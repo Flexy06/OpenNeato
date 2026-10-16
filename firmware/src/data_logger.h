@@ -98,6 +98,7 @@ public:
     void logNtp(const String& event, const std::vector<Field>& extra = {});
     void logGenericEvent(const String& category, const std::vector<Field>& extra = {});
     void logNotification(const String& category, const String& message, bool success);
+    void logGuided(const String& event, const std::vector<Field>& extra = {});
 
     // Log level check — returns current log level from SettingsManager.
     // 0=off (no logging), 1=info (events only), 2=debug (all commands + raw responses).

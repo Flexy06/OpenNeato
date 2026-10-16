@@ -28,6 +28,8 @@ tags:
     description: ESP32 firmware version and OTA update
   - name: History
     description: Cleaning session history and map data
+  - name: Guided
+    description: Floor map (pinned session, rooms, no-go zones) and ESP32-driven room cleaning
 paths:
   /api/version:
     get:
@@ -881,6 +883,131 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /api/floormap:
+    get:
+      tags:
+        - Guided
+      summary: Download the stored floor map document
+      description: |
+        Line-based text format "OFM1" (one record per line, points as integer millimetres "x,y"
+        in the frame of the pinned session, dock = origin):
+
+        ```
+        OFM1
+        S <source session filename>
+        P x,y x,y ...                      path points (repeatable, order kept)
+        R <id> <percent-encoded name> x,y ...  room polygon
+        N <id> x,y ...                     no-go polygon
+        ```
+      responses:
+        "200":
+          description: Floor map document
+          content:
+            text/plain:
+              schema:
+                type: string
+        "404":
+          description: no floor map stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    put:
+      tags:
+        - Guided
+      summary: Replace the floor map (validated before it replaces the current one)
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema:
+              type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "400":
+          description: invalid document (bad header, malformed points, too many zones)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: document larger than 64 KB
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      tags:
+        - Guided
+      summary: Delete the floor map
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "404":
+          description: no floor map stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: guided clean is running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/guided/status:
+    get:
+      tags:
+        - Guided
+      summary: Guided clean progress, live pose estimate and last result
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GuidedStatus"
+  /api/guided:
+    post:
+      tags:
+        - Guided
+      summary: Start, stop or recall a guided (room) clean
+      description: |
+        `start` requires the robot to be idle on its dock (the dock is the map origin).
+        The ESP32 drives the robot in TestMode along the pinned path inside the selected
+        rooms, skipping no-go zones, then returns it to the dock.
+      parameters:
+        - name: action
+          in: query
+          required: true
+          schema:
+            type: string
+            enum:
+              - start
+              - home
+              - stop
+        - name: rooms
+          in: query
+          required: false
+          description: Comma-separated room ids for `start` (empty = all rooms)
+          schema:
+            type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "400":
+          description: missing or unknown action
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: request not possible right now (reason in `error`, e.g. no map, already running)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 components:
   schemas:
     Ok:
@@ -1276,6 +1403,93 @@ components:
         - filterChange
         - brushChange
         - dirtBin
+    GuidedStatus:
+      type: object
+      properties:
+        phase:
+          type: string
+          enum:
+            - idle
+            - starting
+            - running
+            - returning
+            - docking
+            - finishing
+            - done
+            - stopped
+            - failed
+        active:
+          type: boolean
+          description: A run is in progress (starting..finishing)
+        hasMap:
+          type: boolean
+          description: A floor map is stored
+        rooms:
+          type: string
+          description: Room ids requested for the current/last run ("" = all)
+        x:
+          type: number
+          description: Pose estimate in metres (map frame)
+        y:
+          type: number
+        t:
+          type: number
+          description: Heading estimate in degrees (0 = dock heading, counter-clockwise)
+        progress:
+          type: integer
+          description: Processed clean waypoints in percent
+        cleanDone:
+          type: integer
+        cleanTotal:
+          type: integer
+        obstacles:
+          type: integer
+          description: Bumps, stalls and cliffs handled during the run
+        cleaning:
+          type: boolean
+          description: Brush and vacuum currently on
+        elapsed:
+          type: integer
+          description: Seconds since start (frozen when the run ends)
+        startedAt:
+          type: integer
+          description: Unix time of the last start (0 if unknown)
+        message:
+          type: string
+          description: Failure reason, or why the robot returned early (empty on success)
+        compass:
+          type: string
+          enum:
+            - "off"
+            - pending
+            - reference
+            - locked
+          description: LIDAR wall-compass state used to correct heading drift
+        compassFixes:
+          type: integer
+        targetX:
+          type: number
+          description: Current target waypoint (only while active)
+        targetY:
+          type: number
+      required:
+        - phase
+        - active
+        - hasMap
+        - rooms
+        - x
+        - y
+        - t
+        - progress
+        - cleanDone
+        - cleanTotal
+        - obstacles
+        - cleaning
+        - elapsed
+        - startedAt
+        - message
+        - compass
+        - compassFixes
     ManualStatus:
       type: object
       properties:

@@ -494,6 +494,12 @@ void DataLogger::logGenericEvent(const String& category, const std::vector<Field
     logEvent("event", fields);
 }
 
+void DataLogger::logGuided(const String& event, const std::vector<Field>& extra) {
+    std::vector<Field> fields = {{"event", event, FIELD_STRING}};
+    fields.insert(fields.end(), extra.begin(), extra.end());
+    logEvent("guided", fields);
+}
+
 void DataLogger::logNotification(const String& category, const String& message, bool success) {
     logEvent("event", {{"category", category, FIELD_STRING},
                        {"msg", message, FIELD_STRING},

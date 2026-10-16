@@ -51,6 +51,7 @@ public:
     void getVersion(std::function<void(bool, const VersionData&)> callback);
     void getCharger(std::function<void(bool, const ChargerData&)> callback);
     void getBatteryAnalog(std::function<void(bool, const BatteryAnalogData&)> callback);
+    void getBatteryAnalog(std::function<void(bool, const BatteryAnalogData&)> callback, CommandPriority priority);
     void getBatteryWarranty(std::function<void(bool, const BatteryWarrantyData&)> callback);
     void getUserSettings(std::function<void(bool, const UserSettingsData&)> callback);
     void getDigitalSensors(std::function<void(bool, const DigitalSensorData&)> callback);
@@ -106,6 +107,11 @@ public:
     // since the robot reports TESTMODE during manual clean.
     void setManualCleanActive(bool active) { manualCleanActive = active; }
 
+    // -- Guided clean state override -----------------------------------------
+    // Guided clean also runs in TestMode; getState() then reports
+    // "UIMGR_STATE_GUIDEDCLEANING" so the dashboard can show the run.
+    void setGuidedCleanActive(bool active) { guidedCleanActive = active; }
+
     // -- Logger hook ---------------------------------------------------------
 
     // Callback: (command, status, elapsed_ms, raw_response, queue_depth_before, response_bytes, cache_age_ms)
@@ -136,6 +142,7 @@ private:
     std::vector<CommandEntry> queue;
     QueueState state = QUEUE_IDLE;
     bool manualCleanActive = false;
+    bool guidedCleanActive = false;
 
     // SetEvent security key (computed from robot serial number at boot)
     String sKey;
@@ -208,7 +215,8 @@ private:
     // Raw (uncached) fetch methods — enqueue the command and parse response
     void fetchVersion(std::function<void(bool, const VersionData&)> callback);
     void fetchCharger(std::function<void(bool, const ChargerData&)> callback);
-    void fetchBatteryAnalog(std::function<void(bool, const BatteryAnalogData&)> callback);
+    void fetchBatteryAnalog(std::function<void(bool, const BatteryAnalogData&)> callback,
+                            CommandPriority priority = PRIORITY_NORMAL);
     void fetchBatteryWarranty(std::function<void(bool, const BatteryWarrantyData&)> callback);
     void fetchDigitalSensors(std::function<void(bool, const DigitalSensorData&)> callback,
                              CommandPriority priority = PRIORITY_NORMAL);

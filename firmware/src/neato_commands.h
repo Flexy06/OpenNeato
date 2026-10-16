@@ -120,6 +120,10 @@ struct BatteryAnalogData : public JsonSerializable {
     int batteryCurrentMA = 0;
     float batteryTemperatureC = 0.0f;
     float externalVoltageV = 0.0f;
+    // Cliff sensors (mm to floor, ~20 on flat floor). -1 if not reported.
+    // Internal only (used by guided clean), not part of the /api/analog payload.
+    int dropLeftMM = -1;
+    int dropRightMM = -1;
 
     std::vector<Field> toFields() const override;
 };

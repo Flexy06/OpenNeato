@@ -307,6 +307,16 @@ void NeatoSerial::getBatteryAnalog(std::function<void(bool, const BatteryAnalogD
     analogCache.get(callback);
 }
 
+void NeatoSerial::getBatteryAnalog(std::function<void(bool, const BatteryAnalogData&)> callback,
+                                   CommandPriority priority) {
+    // Elevated priority bypasses the cache (guided clean needs fresh cliff readings)
+    if (priority == PRIORITY_NORMAL) {
+        analogCache.get(callback);
+    } else {
+        fetchBatteryAnalog(callback, priority);
+    }
+}
+
 void NeatoSerial::getBatteryWarranty(std::function<void(bool, const BatteryWarrantyData&)> callback) {
     warrantyCache.get(callback);
 }
@@ -348,15 +358,17 @@ void NeatoSerial::getState(std::function<void(bool, const RobotState&)> callback
     // During manual clean, the robot reports UIMGR_STATE_TESTMODE.
     // Override to UIMGR_STATE_MANUALCLEANING so callers (frontend, dashboard)
     // see the correct pseudo-state without needing to know about TestMode internals.
-    if (manualCleanActive) {
-        stateCache.get([callback](bool ok, const RobotState& data) {
+    // Guided clean (also TestMode-based) is reported as UIMGR_STATE_GUIDEDCLEANING.
+    if (manualCleanActive || guidedCleanActive) {
+        const char *override = manualCleanActive ? "UIMGR_STATE_MANUALCLEANING" : "UIMGR_STATE_GUIDEDCLEANING";
+        stateCache.get([callback, override](bool ok, const RobotState& data) {
             if (!ok || !callback) {
                 if (callback)
                     callback(ok, data);
                 return;
             }
             RobotState patched = data;
-            patched.uiState = "UIMGR_STATE_MANUALCLEANING";
+            patched.uiState = override;
             callback(true, patched);
         });
         return;
@@ -403,14 +415,18 @@ void NeatoSerial::fetchCharger(std::function<void(bool, const ChargerData&)> cal
     });
 }
 
-void NeatoSerial::fetchBatteryAnalog(std::function<void(bool, const BatteryAnalogData&)> callback) {
-    enqueue(CMD_GET_ANALOG_SENSORS, [callback](bool ok, const String& raw) {
-        BatteryAnalogData data;
-        if (ok)
-            ok = parseBatteryAnalogData(raw, data);
-        if (callback)
-            callback(ok, data);
-    });
+void NeatoSerial::fetchBatteryAnalog(std::function<void(bool, const BatteryAnalogData&)> callback,
+                                     CommandPriority priority) {
+    enqueue(
+            CMD_GET_ANALOG_SENSORS,
+            [callback](bool ok, const String& raw) {
+                BatteryAnalogData data;
+                if (ok)
+                    ok = parseBatteryAnalogData(raw, data);
+                if (callback)
+                    callback(ok, data);
+            },
+            priority);
 }
 
 void NeatoSerial::fetchBatteryWarranty(std::function<void(bool, const BatteryWarrantyData&)> callback) {

@@ -10,15 +10,18 @@
 #include "cleaning_history.h"
 #include "wifi_manager.h"
 #include "scheduler.h"
+#include "floor_map.h"
+#include "guided_clean_manager.h"
 #include <SPIFFS.h>
 
 unsigned long WebServer::lastApiActivity = 0;
 
 WebServer::WebServer(AsyncWebServer& server, NeatoSerial& neato, DataLogger& logger, SystemManager& sys,
                      FirmwareManager& fw, SettingsManager& settings, ManualCleanManager& manual,
-                     NotificationManager& notif, CleaningHistory& history, WiFiManager& wifi, Scheduler& scheduler) :
+                     NotificationManager& notif, CleaningHistory& history, WiFiManager& wifi, Scheduler& scheduler,
+                     FloorMap& floorMap, GuidedCleanManager& guided) :
     server(server), neato(neato), logger(logger), sysMgr(sys), fwMgr(fw), settingsMgr(settings), manualMgr(manual),
-    notifMgr(notif), historyMgr(history), wifiMgr(wifi), scheduler(scheduler) {}
+    notifMgr(notif), historyMgr(history), wifiMgr(wifi), scheduler(scheduler), floorMap(floorMap), guidedMgr(guided) {}
 
 void WebServer::loggedRoute(const char *path, WebRequestMethodComposite httpMethod, SyncHandler handler) {
     server.on(path, httpMethod, [this, handler](AsyncWebServerRequest *request) {
@@ -74,6 +77,7 @@ void WebServer::begin() {
     registerFirmwareRoutes();
     registerMapRoutes();
     registerWiFiRoutes();
+    registerGuidedRoutes();
 
     LOG("WEB", "Frontend and API routes registered");
 }
@@ -83,7 +87,10 @@ void WebServer::registerApiRoutes() {
 
     registerGetRoute("/api/version", neato, &NeatoSerial::getVersion, {});
     registerGetRoute("/api/charger", neato, &NeatoSerial::getCharger, {});
-    registerGetRoute("/api/analog", neato, &NeatoSerial::getBatteryAnalog, {});
+    registerGetRoute("/api/analog", neato,
+                     static_cast<void (NeatoSerial::*)(std::function<void(bool, const BatteryAnalogData&)>)>(
+                             &NeatoSerial::getBatteryAnalog),
+                     {});
     registerGetRoute("/api/warranty", neato, &NeatoSerial::getBatteryWarranty, {});
     registerGetRoute(
             "/api/motors", neato,
@@ -513,4 +520,104 @@ void WebServer::registerWiFiRoutes() {
     registerPostRoute("/api/wifi/disconnect", wifiMgr, &WiFiManager::disconnect, {});
 
     LOG("WEB", "WiFi routes registered");
+}
+
+// -- Floor map + guided clean ---------------------------------------------------
+
+void WebServer::registerGuidedRoutes() {
+    // GET /api/floormap — stored floor map document (text/plain, OFM1 format)
+    loggedRoute("/api/floormap", HTTP_GET, [this](AsyncWebServerRequest *request) -> int {
+        auto reader = floorMap.read();
+        if (!reader) {
+            sendError(request, 404, "no floor map");
+            return 404;
+        }
+        AsyncWebServerResponse *response =
+                request->beginChunkedResponse("text/plain", [reader](uint8_t *buffer, size_t maxLen, size_t) -> size_t {
+                    return reader->read(buffer, maxLen);
+                });
+        request->send(response);
+        return 200;
+    });
+
+    // PUT /api/floormap — replace the floor map. The body can span several
+    // chunks (up to FLOORMAP_MAX_BYTES), so it is streamed to a temp file and
+    // validated before it replaces the current map.
+    server.on(
+            "/api/floormap", HTTP_PUT,
+            [this](AsyncWebServerRequest *request) {
+                // Body callback already answered; this only fires for empty bodies
+                if (request->contentLength() == 0) {
+                    logger.logRequest(HTTP_PUT, "/api/floormap", 400, 0);
+                    sendError(request, 400, "empty body");
+                }
+            },
+            nullptr,
+            [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+                lastApiActivity = millis();
+                if (index == 0 && !floorMap.beginUpload(total)) {
+                    int code = floorMap.getUploadError() == "map too large" ? 413 : 500;
+                    logger.logRequest(HTTP_PUT, "/api/floormap", code, 0);
+                    sendError(request, code, floorMap.getUploadError());
+                    return;
+                }
+                if (!floorMap.isUploading())
+                    return; // Rejected earlier in this request — already answered
+                if (!floorMap.writeChunk(data, len)) {
+                    int code = floorMap.getUploadError() == "map too large" ? 413 : 500;
+                    logger.logRequest(HTTP_PUT, "/api/floormap", code, 0);
+                    sendError(request, code, floorMap.getUploadError());
+                    return;
+                }
+                if (index + len >= total) {
+                    if (floorMap.endUpload()) {
+                        logger.logRequest(HTTP_PUT, "/api/floormap", 200, 0);
+                        sendOk(request);
+                    } else {
+                        logger.logRequest(HTTP_PUT, "/api/floormap", 400, 0);
+                        sendError(request, 400, floorMap.getUploadError());
+                    }
+                }
+            });
+
+    // DELETE /api/floormap — remove the floor map
+    loggedRoute("/api/floormap", HTTP_DELETE, [this](AsyncWebServerRequest *request) -> int {
+        if (guidedMgr.isActive()) {
+            sendError(request, 409, "guided clean is running");
+            return 409;
+        }
+        if (!floorMap.remove()) {
+            sendError(request, 404, "no floor map");
+            return 404;
+        }
+        sendOk(request);
+        return 200;
+    });
+
+    // GET /api/guided/status — guided clean progress and live pose
+    registerGetRoute("/api/guided/status", guidedMgr, &GuidedCleanManager::getStatusJson);
+
+    // POST /api/guided?action=start|home|stop[&rooms=1,3]
+    loggedRoute("/api/guided", HTTP_POST, [this](AsyncWebServerRequest *request) -> int {
+        String action = detail::paramRaw(request, "action");
+        String rooms = detail::paramRaw(request, "rooms");
+        if (action.isEmpty()) {
+            sendError(request, 400, "missing action");
+            return 400;
+        }
+        if (action == "start" && manualMgr.isActive()) {
+            sendError(request, 409, "manual mode is active");
+            return 409;
+        }
+        String err = guidedMgr.command(action, rooms);
+        if (!err.isEmpty()) {
+            int code = err == "unknown action" ? 400 : 409;
+            sendError(request, code, err);
+            return code;
+        }
+        sendOk(request);
+        return 200;
+    });
+
+    LOG("WEB", "Guided clean routes registered");
 }

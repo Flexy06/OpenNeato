@@ -14,6 +14,8 @@
 #include "manual_clean_manager.h"
 #include "notification_manager.h"
 #include "cleaning_history.h"
+#include "floor_map.h"
+#include "guided_clean_manager.h"
 #include "loop_task.h"
 
 // Global objects
@@ -29,8 +31,10 @@ Scheduler scheduler(settingsManager, systemManager, neatoSerial, dataLogger, pre
 ManualCleanManager manualClean(neatoSerial);
 NotificationManager notifMgr(neatoSerial, settingsManager, dataLogger);
 CleaningHistory cleaningHistory(neatoSerial, dataLogger, systemManager);
+FloorMap floorMap(dataLogger);
+GuidedCleanManager guidedClean(neatoSerial, floorMap, manualClean, dataLogger, systemManager);
 WebServer webServer(server, neatoSerial, dataLogger, systemManager, firmwareManager, settingsManager, manualClean,
-                    notifMgr, cleaningHistory, wifiManager, scheduler);
+                    notifMgr, cleaningHistory, wifiManager, scheduler, floorMap, guidedClean);
 
 // Tracks whether web server has been started (may be deferred if WiFi was slow at boot)
 bool webServerStarted = false;
@@ -153,6 +157,7 @@ void setup() {
         return sc;
     });
     dataLogger.begin();
+    floorMap.begin(); // After SPIFFS mount (DataLogger::begin)
 
     // Fetch robot time as fallback clock (parsed from "Time UTC" in GetVersion)
     neatoSerial.getVersion([](bool ok, const VersionData& v) {

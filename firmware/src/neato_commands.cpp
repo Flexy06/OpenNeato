@@ -440,6 +440,10 @@ bool parseBatteryAnalogData(const String& raw, BatteryAnalogData& out) {
         out.externalVoltageV = csvLastField(val).toFloat() / 1000.0f;
         found = true;
     }
+    if (findCsvValue(raw, "DropSensorLeft", val))
+        out.dropLeftMM = csvLastField(val).toInt();
+    if (findCsvValue(raw, "DropSensorRight", val))
+        out.dropRightMM = csvLastField(val).toInt();
     return found;
 }
 
