@@ -505,10 +505,10 @@ position estimate; **Return to dock** ends cleaning early, **Stop** halts the ro
 
 ### How It Works and Limitations
 
-- **Route**: the recorded path from the dock up to the last point inside a selected room. Points
-  in or within ~28 cm of a no-go zone are dropped. Points inside a selected room are cleaned
-  (brush, vacuum and side brush on); transit stretches are shortcut in straight lines across
-  floor the robot already covered during the recording.
+- **Route**: the recorded points inside the selected rooms (minus anything within ~28 cm of a
+  no-go zone) are split into cleaning runs. Runs are visited nearest-first, in either direction.
+  Between runs and on the way home the robot takes the shortest path over floor it covered during
+  the recording (BFS on a 20 cm grid), so it never replays detours through other rooms.
 - **Driving**: TestMode + `SetMotor`, stop-and-go segments (turn in place, drive at most 60 cm).
 - **Position**: wheel-encoder dead reckoning from the dock. Heading drift is corrected with a
   LIDAR "wall compass" (the dominant wall direction of rectangular rooms); the LIDAR angle
@@ -518,9 +518,11 @@ position estimate; **Return to dock** ends cleaning early, **Stop** halts the ro
 - **Safety**: bumpers, wheel stall and the cliff sensors are polled continuously (stop, back off,
   remember the obstacle, detour). A lifted robot aborts the run. Low battery (20 %), a 2 h limit or
   repeated obstacles send the robot home.
-- **Docking**: the robot retraces its route to a point 45 cm in front of the dock, matches a LIDAR
-  scan against the one taken on the dock to correct its position, and backs onto the contacts. If
-  the contacts are not detected it hands over to the robot's own return-to-base.
+- **Docking**: the robot drives to a staging point 90 cm in front of the dock, turns to the dock
+  heading and matches a LIDAR scan against the one taken on the dock to correct its position. It
+  then reverses along the dock axis, steering its rear onto the line, re-checks the alignment with a
+  second scan 30 cm out and backs straight onto the contacts. A miss triggers one more line-up;
+  after that it hands over to the robot's own return-to-base.
 - Guided runs are not recorded in the cleaning history yet.
 
 ---

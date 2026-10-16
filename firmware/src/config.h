@@ -238,8 +238,10 @@ enum CommandStatus {
 #define GUIDED_MIN_BATTERY_PCT 20 // Return to dock below this charge
 #define GUIDED_BATTERY_POLL_MS 60000 // Battery check cadence while running
 #define GUIDED_MAX_RUNTIME_MS 7200000UL // Hard limit (2h) — return home after this
-#define GUIDED_DOCK_APPROACH_MM 450 // Approach point in front of the dock before backing in
-#define GUIDED_DOCK_BACKIN_MM 480 // Reverse distance from the approach point onto the dock contacts
+#define GUIDED_DOCK_STAGING_MM 900 // Staging point on the dock axis: arrive here, align, scan-match
+#define GUIDED_DOCK_PREBACK_MM 300 // Last stop on the dock axis before the final straight back-in
+#define GUIDED_DOCK_LATERAL_TOL_MM 50 // Max sideways offset from the dock axis for the final back-in
+#define GUIDED_DOCK_ATTEMPTS 2 // Full approach attempts before handing over to the robot's own docking
 #define GUIDED_OBSTACLE_RADIUS_MM 150 // Remembered obstacle footprint (bump/stall) placed ahead of the robot
 #define GUIDED_CLIFF_RADIUS_MM 250 // Remembered cliff footprint
 #define GUIDED_MAX_OBSTACLES 24 // Obstacle memory (oldest dropped first)
@@ -251,9 +253,12 @@ enum CommandStatus {
 #define GUIDED_COMPASS_MIN_CONF 0.35f // Min alignment strength (0..1) of the wall direction histogram
 #define GUIDED_COMPASS_MAX_FIX_DEG 20.0f // Ignore corrections larger than this (clutter / non-rectangular room)
 // Dock homing — ICP scan match against the reference scan taken on the dock
-#define GUIDED_ICP_MAX_TRIES 3 // Re-approach attempts before backing in anyway
-#define GUIDED_ICP_ACCEPT_MM 40 // Back in once the approach point is within this distance
 #define GUIDED_ICP_MAX_CORR_MM 900 // Reject matches that move the pose further than this
+// Path planning — BFS over a coarse grid of floor the recording covered
+#define GUIDED_PLAN_CELL_MM 200 // Planning grid cell (doubled automatically for large homes)
+#define GUIDED_PLAN_MAX_CELLS 120 // Max cells per axis (dist map ≤ 29 KB while planning)
+#define GUIDED_MAX_REPLANS 4 // Re-plans of one transit leg after obstacles before giving up on it
+#define GUIDED_RUN_GAP_MM 1200 // Recorded points further apart than this start a new cleaning run
 
 // Task Watchdog Timer (TWDT) — hardware watchdog that resets the ESP32 if
 // loop() stops running (deadlock, infinite loop, blocking I/O). The main task

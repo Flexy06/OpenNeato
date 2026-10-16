@@ -217,50 +217,516 @@ String GuidedCleanManager::buildPlan(const FloorMapData& map, const String& room
         py = p.y;
     }
 
-    // Route: origin + recorded path, thinned, without no-go points, tagged by room
-    route.reserve(map.path.size() + 1);
-    Waypoint origin;
-    route.push_back(origin);
-    int lastClean = -1;
+    // Cleaning runs: recorded points inside the selected rooms (and clear of
+    // no-go zones), split wherever the recording left the rooms or jumped.
+    // Runs are visited nearest-first; transit between them is planned on the
+    // coverage grid, so the robot no longer replays detours through other rooms.
+    cleanPts.reserve(map.path.size() / 2);
+    bool inRun = false;
     for (const auto& p: map.path) {
-        const Waypoint& prev = route.back();
-        auto dx = static_cast<float>(p.x - prev.x);
-        auto dy = static_cast<float>(p.y - prev.y);
-        if (sqrtf(dx * dx + dy * dy) < GUIDED_MIN_POINT_SPACING_MM)
+        const MapZone *room = nullptr;
+        if (!nearNogo(p.x, p.y)) {
+            for (const MapZone *r: selected) {
+                if (mapgeo::pointInPolygon(p.x, p.y, r->poly)) {
+                    room = r;
+                    break;
+                }
+            }
+        }
+        if (!room) {
+            inRun = false;
             continue;
-        if (nearNogo(p.x, p.y))
-            continue;
+        }
+        if (inRun) {
+            const Waypoint& prev = cleanPts.back();
+            auto dx = static_cast<float>(p.x - prev.x);
+            auto dy = static_cast<float>(p.y - prev.y);
+            float d = sqrtf(dx * dx + dy * dy);
+            if (d < GUIDED_MIN_POINT_SPACING_MM)
+                continue;
+            if (d > GUIDED_RUN_GAP_MM)
+                inRun = false;
+        }
         Waypoint w;
         w.x = p.x;
         w.y = p.y;
-        for (const MapZone *r: selected) {
-            if (mapgeo::pointInPolygon(p.x, p.y, r->poly)) {
-                w.clean = true;
-                w.room = static_cast<uint8_t>(r->id);
-                break;
-            }
+        w.clean = true;
+        w.room = static_cast<uint8_t>(room->id);
+        if (!inRun) {
+            Run r;
+            r.first = static_cast<uint16_t>(cleanPts.size());
+            runs.push_back(r);
+            inRun = true;
         }
-        route.push_back(w);
-        if (w.clean) {
-            lastClean = static_cast<int>(route.size()) - 1;
-            cleanTotal++;
-        }
+        cleanPts.push_back(w);
+        runs.back().last = static_cast<uint16_t>(cleanPts.size() - 1);
     }
 
-    if (lastClean < 0) {
+    if (cleanPts.empty()) {
         freePlan();
         return "the pinned path never enters the selected rooms";
     }
-    route.resize(static_cast<size_t>(lastClean) + 1);
-    route.shrink_to_fit();
+    cleanTotal = static_cast<int>(cleanPts.size());
+    cleanPts.shrink_to_fit();
 
-    LOG("GUIDED", "Plan: %u waypoints (%d clean), %u no-go zones, grid %dx%d", static_cast<unsigned>(route.size()),
-        cleanTotal, static_cast<unsigned>(nogos.size()), cover.w, cover.h);
+    buildGrid();
+
+    LOG("GUIDED", "Plan: %d clean points in %u runs, %u no-go zones, grid %dx%d @%dmm", cleanTotal,
+        static_cast<unsigned>(runs.size()), static_cast<unsigned>(nogos.size()), grid.w, grid.h, grid.cell);
     return "";
+}
+
+// -- Planning grid ------------------------------------------------------------------
+
+void GuidedCleanManager::PlanGrid::toCell(float x, float y, int& cx, int& cy) const {
+    cx = static_cast<int>(floorf((x - static_cast<float>(originX)) / static_cast<float>(cell)));
+    cy = static_cast<int>(floorf((y - static_cast<float>(originY)) / static_cast<float>(cell)));
+}
+
+void GuidedCleanManager::PlanGrid::clear() {
+    std::vector<uint8_t>().swap(free);
+    w = 0;
+    h = 0;
+}
+
+void GuidedCleanManager::buildGrid() {
+    int spanX = cover.w * GUIDED_COVER_CELL_MM;
+    int spanY = cover.h * GUIDED_COVER_CELL_MM;
+    int cell = GUIDED_PLAN_CELL_MM;
+    while (spanX / cell + 1 > GUIDED_PLAN_MAX_CELLS || spanY / cell + 1 > GUIDED_PLAN_MAX_CELLS)
+        cell *= 2;
+    grid.cell = cell;
+    grid.originX = cover.originX;
+    grid.originY = cover.originY;
+    grid.w = spanX / cell + 1;
+    grid.h = spanY / cell + 1;
+    grid.free.assign(static_cast<size_t>(grid.w) * static_cast<size_t>(grid.h), 0);
+
+    // A planning cell is free when at least half of its coverage sub-cells were
+    // driven over during the recording and its centre is clear of no-go zones.
+    int sub = cell / GUIDED_COVER_CELL_MM;
+    for (int cy = 0; cy < grid.h; cy++) {
+        for (int cx = 0; cx < grid.w; cx++) {
+            int hits = 0;
+            for (int sy = 0; sy < sub; sy++) {
+                for (int sx = 0; sx < sub; sx++) {
+                    float x = static_cast<float>(grid.originX + cx * cell + sx * GUIDED_COVER_CELL_MM) +
+                              GUIDED_COVER_CELL_MM / 2.0f;
+                    float y = static_cast<float>(grid.originY + cy * cell + sy * GUIDED_COVER_CELL_MM) +
+                              GUIDED_COVER_CELL_MM / 2.0f;
+                    if (cover.covered(x, y))
+                        hits++;
+                }
+            }
+            bool ok = hits * 2 >= sub * sub && !nearNogo(grid.centerX(cx), grid.centerY(cy));
+            grid.free[static_cast<size_t>(grid.index(cx, cy))] = ok ? 1 : 0;
+        }
+    }
+
+    // The robot leaves the dock straight ahead (+x): keep the dock axis open up
+    // to the staging point even if the recording sampled it sparsely.
+    for (int x = 0; x <= GUIDED_DOCK_STAGING_MM; x += cell / 2) {
+        int cx = 0;
+        int cy = 0;
+        grid.toCell(static_cast<float>(x), 0.0f, cx, cy);
+        if (grid.inside(cx, cy) && !nearNogo(static_cast<float>(x), 0.0f))
+            grid.free[static_cast<size_t>(grid.index(cx, cy))] = 1;
+    }
+}
+
+bool GuidedCleanManager::cellBlocked(int cx, int cy) const {
+    if (!grid.inside(cx, cy))
+        return true;
+    if (!grid.free[static_cast<size_t>(grid.index(cx, cy))])
+        return true;
+    if (planIgnoreObstacles)
+        return false;
+    // Obstacles are remembered generously ahead of the robot; for planning only
+    // block their core so a bump against a wall does not seal a narrow corridor.
+    float x = grid.centerX(cx);
+    float y = grid.centerY(cy);
+    return std::any_of(obstacles.begin(), obstacles.end(), [x, y](const Obstacle& o) {
+        float dx = x - static_cast<float>(o.x);
+        float dy = y - static_cast<float>(o.y);
+        return sqrtf(dx * dx + dy * dy) < static_cast<float>(o.r + GUIDED_ROBOT_RADIUS_MM / 2);
+    });
+}
+
+bool GuidedCleanManager::gridLineFree(float ax, float ay, float bx, float by) const {
+    float dx = bx - ax;
+    float dy = by - ay;
+    float len = sqrtf(dx * dx + dy * dy);
+    float step = static_cast<float>(grid.cell) / 3.0f;
+    int samples = static_cast<int>(len / step) + 1;
+    for (int i = 0; i <= samples; i++) {
+        float t = static_cast<float>(i) / static_cast<float>(samples);
+        int cx = 0;
+        int cy = 0;
+        grid.toCell(ax + dx * t, ay + dy * t, cx, cy);
+        if (cellBlocked(cx, cy))
+            return false;
+    }
+    if (planIgnoreObstacles) {
+        for (const auto& z: nogos) {
+            if (mapgeo::segmentNearPolygon(ax, ay, bx, by, z.poly, GUIDED_NOGO_MARGIN_MM))
+                return false;
+        }
+        return true;
+    }
+    return segmentClear(ax, ay, bx, by, false);
+}
+
+// Shortest path from the current pose to (gx, gy) over free cells: BFS from the
+// goal (8-connected, no corner cutting), walk downhill from the start, then pull
+// the string so the result is a few straight legs instead of a staircase.
+// Uses a transient uint16 distance map (≤ GUIDED_PLAN_MAX_CELLS² × 2 bytes).
+bool GuidedCleanManager::planPath(float gx, float gy, std::vector<Waypoint>& out) const {
+    if (planPathOnce(gx, gy, out))
+        return true;
+    if (obstacles.empty())
+        return false;
+    // Remembered obstacles may be phantom (drift made us touch a wall) or have
+    // moved: try again without them rather than giving up on the goal.
+    LOG("GUIDED", "Plan: retrying without obstacle memory");
+    planIgnoreObstacles = true;
+    bool ok = planPathOnce(gx, gy, out);
+    planIgnoreObstacles = false;
+    return ok;
+}
+
+bool GuidedCleanManager::planPathOnce(float gx, float gy, std::vector<Waypoint>& out) const {
+    out.clear();
+    if (grid.w == 0)
+        return false;
+
+    auto snap = [this](float x, float y, int& cx, int& cy) {
+        grid.toCell(x, y, cx, cy);
+        if (!cellBlocked(cx, cy))
+            return true;
+        // Drift or an obstacle put us on a blocked cell: use the nearest free one
+        for (int r = 1; r <= 4; r++) {
+            int best = -1;
+            int bx = 0;
+            int by = 0;
+            for (int dy = -r; dy <= r; dy++) {
+                for (int dx = -r; dx <= r; dx++) {
+                    if (abs(dx) != r && abs(dy) != r)
+                        continue;
+                    if (cellBlocked(cx + dx, cy + dy))
+                        continue;
+                    int d = dx * dx + dy * dy;
+                    if (best < 0 || d < best) {
+                        best = d;
+                        bx = cx + dx;
+                        by = cy + dy;
+                    }
+                }
+            }
+            if (best >= 0) {
+                cx = bx;
+                cy = by;
+                return true;
+            }
+        }
+        return false;
+    };
+
+    int sx = 0;
+    int sy = 0;
+    int tx = 0;
+    int ty = 0;
+    if (!snap(poseX, poseY, sx, sy) || !snap(gx, gy, tx, ty)) {
+        LOG("GUIDED", "Plan: no free cell near %s", snap(poseX, poseY, sx, sy) ? "goal" : "robot");
+        return false;
+    }
+
+    const uint16_t INF = 0xFFFF;
+    std::vector<uint16_t> dist(static_cast<size_t>(grid.w) * static_cast<size_t>(grid.h), INF);
+    std::vector<uint16_t> frontier;
+    std::vector<uint16_t> next;
+    dist[static_cast<size_t>(grid.index(tx, ty))] = 0;
+    frontier.push_back(static_cast<uint16_t>(grid.index(tx, ty)));
+    const int DX[8] = {1, -1, 0, 0, 1, 1, -1, -1};
+    const int DY[8] = {0, 0, 1, -1, 1, -1, 1, -1};
+    uint16_t level = 0;
+    size_t startIdx = static_cast<size_t>(grid.index(sx, sy));
+    while (!frontier.empty() && dist[startIdx] == INF && level < INF - 1) {
+        level++;
+        next.clear();
+        for (uint16_t idx: frontier) {
+            int cx = idx % grid.w;
+            int cy = idx / grid.w;
+            for (int k = 0; k < 8; k++) {
+                int nx = cx + DX[k];
+                int ny = cy + DY[k];
+                if (cellBlocked(nx, ny))
+                    continue;
+                if (k >= 4 && (cellBlocked(cx + DX[k], cy) || cellBlocked(cx, cy + DY[k])))
+                    continue; // No diagonal squeeze past a corner
+                auto ni = static_cast<size_t>(grid.index(nx, ny));
+                if (dist[ni] != INF)
+                    continue;
+                dist[ni] = level;
+                next.push_back(static_cast<uint16_t>(ni));
+            }
+        }
+        frontier.swap(next);
+    }
+    if (dist[startIdx] == INF) {
+        LOG("GUIDED", "Plan: goal %.0f,%.0f not reachable from %.0f,%.0f", gx, gy, poseX, poseY);
+        return false;
+    }
+
+    // Walk downhill from start to goal
+    std::vector<Waypoint> cells;
+    int cx = sx;
+    int cy = sy;
+    while (dist[static_cast<size_t>(grid.index(cx, cy))] > 0) {
+        uint16_t here = dist[static_cast<size_t>(grid.index(cx, cy))];
+        int bx = cx;
+        int by = cy;
+        for (int k = 0; k < 8; k++) {
+            int nx = cx + DX[k];
+            int ny = cy + DY[k];
+            if (!grid.inside(nx, ny))
+                continue;
+            if (dist[static_cast<size_t>(grid.index(nx, ny))] == here - 1) {
+                bx = nx;
+                by = ny;
+                if (k < 4)
+                    break; // Prefer straight moves
+            }
+        }
+        if (bx == cx && by == cy)
+            return false; // Should not happen
+        cx = bx;
+        cy = by;
+        Waypoint w;
+        w.x = static_cast<int16_t>(grid.centerX(cx));
+        w.y = static_cast<int16_t>(grid.centerY(cy));
+        cells.push_back(w);
+    }
+    std::vector<uint16_t>().swap(dist);
+    if (!cells.empty()) {
+        cells.back().x = static_cast<int16_t>(gx);
+        cells.back().y = static_cast<int16_t>(gy);
+    } else {
+        Waypoint w;
+        w.x = static_cast<int16_t>(gx);
+        w.y = static_cast<int16_t>(gy);
+        cells.push_back(w);
+    }
+
+    // String pulling: from each anchor jump to the farthest cell still in line of sight
+    float ax = poseX;
+    float ay = poseY;
+    size_t i = 0;
+    while (i < cells.size()) {
+        size_t far = i;
+        for (size_t j = cells.size(); j-- > i;) {
+            if (gridLineFree(ax, ay, cells[j].x, cells[j].y)) {
+                far = j;
+                break;
+            }
+        }
+        out.push_back(cells[far]);
+        ax = cells[far].x;
+        ay = cells[far].y;
+        i = far + 1;
+    }
+    return true;
+}
+
+// -- Legs -----------------------------------------------------------------------------
+
+void GuidedCleanManager::setLeg(std::vector<Waypoint>& pts, bool transit) {
+    route.clear();
+    Waypoint here;
+    here.x = static_cast<int16_t>(poseX);
+    here.y = static_cast<int16_t>(poseY);
+    route.push_back(here); // Index 0 = where the leg starts (already "reached")
+    for (Waypoint w: pts) {
+        if (transit)
+            w.clean = false;
+        route.push_back(w);
+    }
+    legTransit = transit;
+    legReplans = 0;
+    routeIdx = 0;
+    targetIdx = 0;
+    obstacleStreak = 0;
+    selectNextTarget();
+}
+
+void GuidedCleanManager::startNextLeg() {
+    // Nearest unfinished run end (runs may be cleaned in either direction)
+    int best = -1;
+    bool bestRev = false;
+    float bestD = 1e12f;
+    for (size_t r = 0; r < runs.size(); r++) {
+        if (runs[r].done)
+            continue;
+        const Waypoint& a = cleanPts[runs[r].first];
+        const Waypoint& b = cleanPts[runs[r].last];
+        float da = (a.x - poseX) * (a.x - poseX) + (a.y - poseY) * (a.y - poseY);
+        float db = (b.x - poseX) * (b.x - poseX) + (b.y - poseY) * (b.y - poseY);
+        if (da < bestD) {
+            bestD = da;
+            best = static_cast<int>(r);
+            bestRev = false;
+        }
+        if (db < bestD) {
+            bestD = db;
+            best = static_cast<int>(r);
+            bestRev = true;
+        }
+    }
+    if (best < 0) {
+        beginReturn("done");
+        return;
+    }
+    curRun = best;
+    curReversed = bestRev;
+    const Waypoint& entry = cleanPts[bestRev ? runs[best].last : runs[best].first];
+    legGoalX = entry.x;
+    legGoalY = entry.y;
+
+    if (sqrtf(bestD) < 400.0f) {
+        loadRunLeg();
+        return;
+    }
+    std::vector<Waypoint> path;
+    if (planPath(legGoalX, legGoalY, path)) {
+        LOG("GUIDED", "Transit to run %d (%u legs)", best, static_cast<unsigned>(path.size()));
+        setLeg(path, true);
+        return;
+    }
+    skipCurrentRun("unreachable");
+}
+
+void GuidedCleanManager::loadRunLeg() {
+    const Run& r = runs[static_cast<size_t>(curRun)];
+    std::vector<Waypoint> pts;
+    pts.reserve(r.last - r.first + 1u);
+    for (int i = r.first; i <= r.last; i++)
+        pts.push_back(cleanPts[static_cast<size_t>(i)]);
+    if (curReversed) {
+        for (size_t i = 0, j = pts.size() - 1; i < j; i++, j--) {
+            Waypoint t = pts[i];
+            pts[i] = pts[j];
+            pts[j] = t;
+        }
+    }
+    setLeg(pts, false);
+}
+
+void GuidedCleanManager::skipCurrentRun(const char *why) {
+    if (curRun < 0)
+        return;
+    Run& r = runs[static_cast<size_t>(curRun)];
+    if (!r.done) {
+        // Count the remaining points as processed so progress stays honest-ish
+        int remaining = r.last - r.first + 1;
+        if (!legTransit) {
+            remaining = 0;
+            for (size_t i = routeIdx + 1; i < route.size(); i++)
+                if (route[i].clean)
+                    remaining++;
+        }
+        cleanDone += remaining;
+        r.done = true;
+    }
+    LOG("GUIDED", "Skipping run %d (%s)", curRun, why);
+    dataLogger.logGuided("skip_run", {{"run", String(curRun), FIELD_INT}, {"reason", why, FIELD_STRING}});
+    curRun = -1;
+    setCleaningMotors(false);
+    startNextLeg();
+}
+
+void GuidedCleanManager::onLegComplete() {
+    if (phase == Phase::Returning) {
+        beginDocking();
+        return;
+    }
+    if (legTransit) {
+        loadRunLeg();
+        return;
+    }
+    if (curRun >= 0)
+        runs[static_cast<size_t>(curRun)].done = true;
+    curRun = -1;
+    startNextLeg();
+}
+
+// An obstacle blocks a transit leg: plan around it (it is now in obstacle memory)
+void GuidedCleanManager::onTransitBlocked() {
+    legReplans++;
+    std::vector<Waypoint> path;
+    if (legReplans <= GUIDED_MAX_REPLANS && planPath(legGoalX, legGoalY, path)) {
+        int replans = legReplans;
+        setLeg(path, true);
+        legReplans = replans;
+        return;
+    }
+    if (phase == Phase::Running) {
+        skipCurrentRun("blocked");
+    } else if (!fallbackHome) {
+        fallbackReturn();
+    } else {
+        fail("path back to the dock is blocked");
+    }
+}
+
+void GuidedCleanManager::pushCrumb() {
+    if (!crumbs.empty()) {
+        float dx = static_cast<float>(crumbs.back().x) - poseX;
+        float dy = static_cast<float>(crumbs.back().y) - poseY;
+        if (sqrtf(dx * dx + dy * dy) < 400.0f)
+            return;
+    }
+    if (crumbs.size() >= 600) {
+        // Thin out: keep every second crumb
+        size_t k = 0;
+        for (size_t i = 0; i < crumbs.size(); i += 2)
+            crumbs[k++] = crumbs[i];
+        crumbs.resize(k);
+    }
+    MapPoint p;
+    p.x = static_cast<int16_t>(poseX);
+    p.y = static_cast<int16_t>(poseY);
+    crumbs.push_back(p);
+}
+
+// Planning failed: retrace the breadcrumbs (shortcut over covered floor)
+void GuidedCleanManager::fallbackReturn() {
+    fallbackHome = true;
+    LOG("GUIDED", "Planner could not find a way home — retracing %u crumbs", static_cast<unsigned>(crumbs.size()));
+    std::vector<Waypoint> back;
+    back.reserve(crumbs.size() + 1);
+    for (size_t i = crumbs.size(); i-- > 0;) {
+        Waypoint w;
+        w.x = crumbs[i].x;
+        w.y = crumbs[i].y;
+        back.push_back(w);
+    }
+    Waypoint staging;
+    staging.x = GUIDED_DOCK_STAGING_MM;
+    staging.y = 0;
+    back.push_back(staging);
+    legGoalX = GUIDED_DOCK_STAGING_MM;
+    legGoalY = 0.0f;
+    setLeg(back, true);
+    legReplans = GUIDED_MAX_REPLANS + 1; // No further re-planning on this leg
 }
 
 void GuidedCleanManager::freePlan() {
     std::vector<Waypoint>().swap(route);
+    std::vector<Waypoint>().swap(cleanPts);
+    std::vector<Run>().swap(runs);
+    std::vector<MapPoint>().swap(crumbs);
+    grid.clear();
+    curRun = -1;
+    fallbackHome = false;
     std::vector<MapZone>().swap(nogos);
     std::vector<Obstacle>().swap(obstacles);
     cover.clear();
@@ -299,6 +765,8 @@ String GuidedCleanManager::command(const String& action, const String& rooms) {
         fallbackDock = false;
         inTestMode = false;
         dockStage = 0;
+        dockAttempts = 0;
+        dockIcpNearDone = false;
         ldsOn = false;
         compassTried = false;
         compassRef = false;
@@ -321,7 +789,7 @@ String GuidedCleanManager::command(const String& action, const String& rooms) {
         poseY = 0.0f;
         poseTheta = 0.0f;
         dataLogger.logGuided("start", {{"rooms", rooms.isEmpty() ? String("all") : rooms, FIELD_STRING},
-                                       {"waypoints", String(static_cast<unsigned>(route.size())), FIELD_INT},
+                                       {"runs", String(static_cast<unsigned>(runs.size())), FIELD_INT},
                                        {"clean", String(cleanTotal), FIELD_INT}});
         beginStart();
         return "";
@@ -409,8 +877,8 @@ void GuidedCleanManager::beginStart() {
                             targetIdx = 0;
                             batteryTicker.reset();
                             batteryTicker.elapsed(GUIDED_BATTERY_POLL_MS); // Arm: first check after one interval
-                            LOG("GUIDED", "Running (%u waypoints)", static_cast<unsigned>(route.size()));
-                            selectNextTarget();
+                            LOG("GUIDED", "Running (%u runs)", static_cast<unsigned>(runs.size()));
+                            startNextLeg();
                         },
                         PRIORITY_HIGH);
             });
@@ -628,31 +1096,35 @@ void GuidedCleanManager::endSegment(bool obstacle) {
     seg = SegKind::None;
 
     if (finished == SegKind::Backoff) {
-        // Back-off complete: skip past the obstructed target and carry on
-        if (phase == Phase::Running || phase == Phase::Returning) {
-            obstacleStreak++;
-            if (obstacleStreak >= GUIDED_MAX_OBSTACLE_STREAK) {
-                if (phase == Phase::Running) {
-                    beginReturn("too many obstacles");
-                } else {
-                    fail("path back to the dock is blocked");
-                }
-                return;
-            }
-            const Waypoint& blocked = route[targetIdx];
-            size_t i = targetIdx;
-            while (i + 1 < route.size()) {
-                auto dx = static_cast<float>(route[i].x - blocked.x);
-                auto dy = static_cast<float>(route[i].y - blocked.y);
-                if (sqrtf(dx * dx + dy * dy) >= GUIDED_SKIP_AFTER_OBSTACLE_MM)
-                    break;
-                i++;
-            }
-            markReached(i > targetIdx ? i - 1 : targetIdx);
-            selectNextTarget();
-        } else if (phase == Phase::Docking) {
-            fail("obstacle while docking");
+        if (phase == Phase::Docking) {
+            // Bumped while lining up: start the approach over from the staging point
+            dockAttempts++;
+            dockStage = dockAttempts >= GUIDED_DOCK_ATTEMPTS ? 10 : 4;
+            return;
         }
+        if (phase != Phase::Running && phase != Phase::Returning)
+            return;
+        if (legTransit) {
+            onTransitBlocked();
+            return;
+        }
+        // Cleaning run: skip past the obstructed point and carry on
+        obstacleStreak++;
+        if (obstacleStreak >= GUIDED_MAX_OBSTACLE_STREAK) {
+            skipCurrentRun("too many obstacles");
+            return;
+        }
+        const Waypoint& blocked = route[targetIdx];
+        size_t i = targetIdx;
+        while (i + 1 < route.size()) {
+            auto dx = static_cast<float>(route[i].x - blocked.x);
+            auto dy = static_cast<float>(route[i].y - blocked.y);
+            if (sqrtf(dx * dx + dy * dy) >= GUIDED_SKIP_AFTER_OBSTACLE_MM)
+                break;
+            i++;
+        }
+        markReached(i > targetIdx ? i - 1 : targetIdx);
+        selectNextTarget();
         return;
     }
 
@@ -700,9 +1172,12 @@ void GuidedCleanManager::markReached(size_t idx) {
     }
     if (idx > routeIdx)
         routeIdx = idx;
+    pushCrumb();
 }
 
 void GuidedCleanManager::selectNextTarget() {
+    if (route.empty())
+        return;
     size_t last = route.size() - 1;
     size_t next = routeIdx + 1;
     if (next > last) {
@@ -794,43 +1269,16 @@ void GuidedCleanManager::step() {
     }
 
     if (phase == Phase::Docking) {
-        // Stage 4: drive (forward or backward) to the approach point after an ICP correction
-        if (dockStage == 4) {
-            if (!driveTowards(GUIDED_DOCK_APPROACH_MM, 0.0f, GUIDED_SPEED_SLOW, true, GUIDED_ICP_ACCEPT_MM / 2))
-                dockStage = 0;
-            return;
-        }
-        // Stage 0: face away from the dock (heading 0) so the rear points at it
-        if (dockStage == 0) {
-            float err = wrapAngle(0.0f - poseTheta);
-            if (fabsf(err) > 3.0f * DEG) {
-                int arc = static_cast<int>(err * GUIDED_WHEEL_BASE_MM / 2.0f);
-                startSegment(SegKind::Turn, -arc, arc, GUIDED_SPEED_TURN);
-                return;
-            }
-            // Same heading as the reference scan → match it to locate the dock precisely
-            if (refScanValid && compassSign != 0 && dockIcpTries < GUIDED_ICP_MAX_TRIES) {
-                dockIcpTries++;
-                dockStage = 3;
-                requestIcpScan();
-                return;
-            }
-            dockStage = 5;
-        }
-        // Stage 5: back onto the contacts
-        if (dockStage == 5) {
-            dockStage = 1;
-            startSegment(SegKind::DockBack, -GUIDED_DOCK_BACKIN_MM, -GUIDED_DOCK_BACKIN_MM, GUIDED_SPEED_SLOW);
-        }
+        stepDocking();
         return;
     }
 
-    // Every waypoint processed (reached or skipped) → phase complete
+    if (route.empty())
+        return;
+
+    // Every waypoint of this leg processed (reached or skipped)
     if (routeIdx >= route.size() - 1 && targetIdx <= routeIdx) {
-        if (phase == Phase::Running)
-            beginReturn("done");
-        else
-            beginDocking();
+        onLegComplete();
         return;
     }
 
@@ -843,10 +1291,7 @@ void GuidedCleanManager::step() {
         obstacleStreak = 0;
         markReached(targetIdx);
         if (routeIdx >= route.size() - 1) {
-            if (phase == Phase::Running)
-                beginReturn("done");
-            else
-                beginDocking();
+            onLegComplete();
             return;
         }
         selectNextTarget();
@@ -908,43 +1353,141 @@ void GuidedCleanManager::beginReturn(const String& reason) {
     lastError = reason == "done" ? String("") : reason;
     setCleaningMotors(false);
 
-    // Retrace the travelled route back towards the dock. The final waypoint is
-    // the approach point in front of the dock instead of the dock itself.
-    std::vector<Waypoint> back;
-    back.reserve(routeIdx + 2);
-    for (size_t i = routeIdx + 1; i-- > 0;) {
-        Waypoint w = route[i];
-        w.clean = false;
-        back.push_back(w);
-    }
-    Waypoint approach;
-    approach.x = GUIDED_DOCK_APPROACH_MM;
-    approach.y = 0;
-    back.back() = approach;
-    if (back.size() == 1) {
-        // Barely left the dock: approach point only
-        back.insert(back.begin(), back.front());
-    }
-    route.swap(back);
-    std::vector<Waypoint>().swap(back);
-
     phase = Phase::Returning;
-    obstacleStreak = 0;
-    routeIdx = 0;
-    targetIdx = 0;
+    curRun = -1;
     if (seg != SegKind::None && seg != SegKind::Backoff) {
         seg = SegKind::None;
         serial.setMotorWheels(0, 0, 0, nullptr);
     }
-    selectNextTarget();
+
+    // Shortest known-free path to the staging point on the dock axis
+    legGoalX = GUIDED_DOCK_STAGING_MM;
+    legGoalY = 0.0f;
+    std::vector<Waypoint> path;
+    if (planPath(legGoalX, legGoalY, path)) {
+        setLeg(path, true);
+        return;
+    }
+    fallbackReturn();
 }
 
 void GuidedCleanManager::beginDocking() {
-    LOG("GUIDED", "At dock approach point (%.0f,%.0f) — docking", poseX, poseY);
+    LOG("GUIDED", "At staging point (%.0f,%.0f) — docking", poseX, poseY);
     phase = Phase::Docking;
     dockStage = 0;
-    distSinceFix = GUIDED_COMPASS_EVERY_MM; // Re-align before the final turn
+    dockIcpNearDone = false;
+    distSinceFix = GUIDED_COMPASS_EVERY_MM; // Re-align heading before lining up
     dockIcpTries = 0;
+}
+
+// Deterministic dock approach. The dock is the map origin and the robot docks
+// rear-first while facing +x, so the final approach is a straight reverse along
+// the x axis:
+//   0  turn to heading 0 at the staging point
+//   3  scan-match against the dock reference scan (same heading → the LIDAR
+//      mounting offset cancels) and correct the pose
+//   4  (re)drive to the staging point
+//   6  reverse towards the pre-back point, steering the rear onto the axis
+//   7  re-align heading 0, final scan match close to the dock
+//   5  straight back-in onto the contacts → 1 (moving) → 2 (verify)
+//   10 give up: hand over to the robot's own SEND_TO_BASE
+void GuidedCleanManager::stepDocking() {
+    const float staging = GUIDED_DOCK_STAGING_MM;
+    const float preback = GUIDED_DOCK_PREBACK_MM;
+    bool canMatch = refScanValid && compassSign != 0;
+
+    auto faceZero = [this](float tolDeg) {
+        float err = wrapAngle(0.0f - poseTheta);
+        if (fabsf(err) > tolDeg * DEG) {
+            int arc = static_cast<int>(err * GUIDED_WHEEL_BASE_MM / 2.0f);
+            startSegment(SegKind::Turn, -arc, arc, GUIDED_SPEED_TURN);
+            return true;
+        }
+        return false;
+    };
+
+    switch (dockStage) {
+        case 0:
+            if (faceZero(3.0f))
+                return;
+            if (canMatch && dockIcpTries < 2) {
+                dockIcpTries++;
+                requestIcpScan(4);
+                return;
+            }
+            dockStage = 6;
+            return;
+        case 4:
+            // After a correction: only re-drive if we are clearly off the staging point
+            if (fabsf(poseY) > 150.0f || fabsf(poseX - staging) > 250.0f) {
+                if (driveTowards(staging, 0.0f, GUIDED_SPEED_SLOW, true, 60))
+                    return;
+                dockStage = 0;
+                return;
+            }
+            dockStage = 6;
+            return;
+        case 6: {
+            if (poseX <= preback + 20.0f) {
+                dockStage = 7;
+                return;
+            }
+            // Reverse pure-pursuit: aim the rear at a point on the axis behind us
+            float tx = poseX - 350.0f;
+            if (tx < preback)
+                tx = preback;
+            float want = atan2f(poseY - 0.0f, poseX - tx); // Heading with the rear towards (tx, 0)
+            float err = wrapAngle(want - poseTheta);
+            if (fabsf(err) > 3.0f * DEG) {
+                int arc = static_cast<int>(err * GUIDED_WHEEL_BASE_MM / 2.0f);
+                startSegment(SegKind::Turn, -arc, arc, GUIDED_SPEED_TURN);
+                return;
+            }
+            float dx = poseX - tx;
+            float dy = poseY;
+            int stepMM = static_cast<int>(fminf(sqrtf(dx * dx + dy * dy), 250.0f));
+            if (stepMM < 20) {
+                dockStage = 7;
+                return;
+            }
+            startSegment(SegKind::Reverse, -stepMM, -stepMM, GUIDED_SPEED_SLOW);
+            return;
+        }
+        case 7:
+            if (faceZero(2.0f))
+                return;
+            if (canMatch && !dockIcpNearDone) {
+                dockIcpNearDone = true;
+                requestIcpScan(7);
+                return;
+            }
+            if (fabsf(poseY) > GUIDED_DOCK_LATERAL_TOL_MM) {
+                // Too far off the axis for a straight back-in: pull forward and redo the line-up
+                dockAttempts++;
+                if (dockAttempts >= GUIDED_DOCK_ATTEMPTS) {
+                    dockStage = 5; // Best effort
+                    return;
+                }
+                dockIcpNearDone = false;
+                dockIcpTries = 0;
+                dockStage = 4;
+                return;
+            }
+            dockStage = 5;
+            return;
+        case 5: {
+            dockStage = 1;
+            int back = static_cast<int>(poseX) + 60; // Overshoot slightly: the dock stops us
+            startSegment(SegKind::DockBack, -back, -back, GUIDED_SPEED_SLOW);
+            return;
+        }
+        case 10:
+            fallbackDock = true;
+            finish(Phase::Done, lastError.isEmpty() ? String("docked by the robot") : lastError);
+            return;
+        default:
+            return;
+    }
 }
 
 void GuidedCleanManager::checkDocked() {
@@ -959,7 +1502,16 @@ void GuidedCleanManager::checkDocked() {
                     finish(Phase::Done, lastError);
                     return;
                 }
-                // Contacts not found: hand over to the robot's own docking
+                dockAttempts++;
+                if (dockAttempts < GUIDED_DOCK_ATTEMPTS) {
+                    // Missed the contacts: drive back out to the staging point and line up again
+                    LOG("GUIDED", "Dock contacts not detected — retrying approach");
+                    dockStage = 4;
+                    dockIcpTries = 0;
+                    dockIcpNearDone = false;
+                    return;
+                }
+                // Contacts still not found: hand over to the robot's own docking
                 LOG("GUIDED", "Dock contacts not detected — requesting robot docking");
                 fallbackDock = true;
                 finish(Phase::Done, lastError);
@@ -1156,14 +1708,16 @@ void GuidedCleanManager::applyCompass(const LdsScanData& scan, bool reference) {
 
 // -- Dock homing (ICP against the reference scan) ------------------------------------------
 
-void GuidedCleanManager::requestIcpScan() {
+void GuidedCleanManager::requestIcpScan(uint8_t resumeStage) {
     uint32_t gen = runGen;
     waitingCmd = true;
+    dockStage = 3;
     lastScanMs = millis();
-    serial.getLdsScan([this, gen](bool ok, const LdsScanData& scan) {
+    serial.getLdsScan([this, gen, resumeStage](bool ok, const LdsScanData& scan) {
         if (gen != runGen)
             return;
         waitingCmd = false;
+        dockStage = resumeStage;
         float cx = 0.0f;
         float cy = 0.0f;
         float ct = 0.0f;
@@ -1171,19 +1725,14 @@ void GuidedCleanManager::requestIcpScan() {
             poseX += cx;
             poseY += cy;
             poseTheta = wrapAngle(poseTheta + ct);
-            float ax = GUIDED_DOCK_APPROACH_MM - poseX;
-            float ay = -poseY;
-            float off = sqrtf(ax * ax + ay * ay);
-            LOG("GUIDED", "Dock ICP: corrected by %.0f,%.0f mm %.1f° → %.0f mm from approach point", cx, cy, ct / DEG,
-                off);
+            LOG("GUIDED", "Dock ICP: corrected by %.0f,%.0f mm %.1f° → pose %.0f,%.0f", cx, cy, ct / DEG, poseX, poseY);
             dataLogger.logGuided("dock_match", {{"dx", String(static_cast<int>(cx)), FIELD_INT},
                                                 {"dy", String(static_cast<int>(cy)), FIELD_INT},
-                                                {"offset", String(static_cast<int>(off)), FIELD_INT}});
-            dockStage = off > GUIDED_ICP_ACCEPT_MM ? 4 : 5;
+                                                {"x", String(static_cast<int>(poseX)), FIELD_INT},
+                                                {"y", String(static_cast<int>(poseY)), FIELD_INT}});
             return;
         }
-        LOG("GUIDED", "Dock ICP: no reliable match — backing in on odometry");
-        dockStage = 5;
+        LOG("GUIDED", "Dock ICP: no reliable match — continuing on odometry");
     });
 }
 

@@ -33,6 +33,7 @@ Scenarios (two rooms joined by a door, one no-go zone in room 2):
 | clockwise LIDAR           | compass direction auto-calibration                      |
 | no compass, low drift     | odometry-only fallback                                  |
 | lidar offset + furniture  | compass + dock ICP with an off-centre turret            |
+| room 1 only               | recording detours via room 2 — robot must not follow it |
 
 The model is deliberately simple (no wheel inertia, perfect encoders apart from
 slip, no carpet). Passing it means the control logic is consistent; it does not

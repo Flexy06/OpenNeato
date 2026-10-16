@@ -78,6 +78,7 @@ struct Result {
     bool docked;
     double minNogoDist; // min distance robot centre ↔ no-go rectangle (negative = inside)
     double coverB; // fraction of room-B cells (outside no-go) passed with brush on
+    double maxX; // furthest the robot centre got in +x (room 2 starts at x = 3000)
     double simMinutes;
     int collisions;
 };
@@ -114,11 +115,11 @@ static Result runScenario(const char *name, const char *rooms, std::function<voi
     String err = guided.command("start", rooms);
     if (!err.isEmpty()) {
         std::printf("start refused: %s\n", err.c_str());
-        return {"refused", err.str(), false, 0, 0, 0, 0};
+        return {"refused", err.str(), false, 0, 0, 0, 0, 0};
     }
 
     std::set<long> brushCells;
-    double minNogo = 1e9, maxErr = 0, sumErr = 0;
+    double minNogo = 1e9, maxErr = 0, sumErr = 0, maxX = -1e9;
     long errSamples = 0;
     unsigned long lastPrint = 0;
     while (g_simMillis < 3UL * 3600 * 1000) {
@@ -127,6 +128,7 @@ static Result runScenario(const char *name, const char *rooms, std::function<voi
         serial.runDue();
         TaskRegistry::tickAll();
         minNogo = std::min(minNogo, rectDist(serial.tx, serial.ty, 4200, 600, 4900, 1400));
+        maxX = std::max(maxX, serial.tx);
         if (guided.isActive() && (g_simMillis - 1) % 1000 == 0) {
             std::string st = guided.getStatusJson().str();
             auto num = [&](const char *k) { auto p = st.find(std::string("\"") + k + "\":"); return p == std::string::npos ? 0.0 : std::atof(st.c_str() + p + std::strlen(k) + 3); };
@@ -176,10 +178,11 @@ static Result runScenario(const char *name, const char *rooms, std::function<voi
     r.coverB = total ? static_cast<double>(hit) / total : 0;
     r.simMinutes = g_simMillis / 60000.0;
     r.collisions = serial.collisions;
+    r.maxX = maxX;
     std::printf("  → phase=%s msg='%s' docked=%d minNoGoDist=%.0fmm roomB coverage=%.0f%% time=%.1fmin "
-                "poseErr avg=%.0f max=%.0fmm\n",
+                "poseErr avg=%.0f max=%.0fmm maxX=%.0f\n",
                 r.phase.c_str(), r.message.c_str(), r.docked, r.minNogoDist, r.coverB * 100, r.simMinutes,
-                errSamples ? sumErr / errSamples : 0.0, maxErr);
+                errSamples ? sumErr / errSamples : 0.0, maxErr, maxX);
     return r;
 }
 
@@ -240,6 +243,12 @@ int main(int argc, char **argv) {
         s.cliffMaxY = 2000;
     });
     expect(f.phase == "done", "completes with cliff present");
+
+    // 10. Only room 1: the recording detours through room 2 before finishing
+    //     room 1 — the robot must not follow that detour
+    Result m = runScenario("room 1 only (recording detours via room 2)", "1", [](NeatoSerial&) {});
+    expect(m.phase == "done" && m.docked, "completes and docks");
+    expect(m.maxX < 3000 - 100, "never drives into room 2");
 
     // 9. LIDAR mounted behind the centre + furniture the recording never touched
     Result k = runScenario("lidar offset + furniture", "1,2", [](NeatoSerial& s) {
