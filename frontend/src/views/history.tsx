@@ -255,6 +255,7 @@ export function HistoryView({ distanceUnit }: HistoryViewProps) {
                         mapEmpty={mapEmpty}
                         recording={selectedRecording}
                         distanceUnit={distanceUnit}
+                        onError={errorStack.push}
                     />
                 )}
 

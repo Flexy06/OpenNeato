@@ -1,6 +1,7 @@
 import { DEMO_VERSION } from "./build-info.js";
 import mapdataEmpty04 from "./mapdata-empty-04.jsonl";
 import mapdataHouse03 from "./mapdata-house-03.jsonl";
+import mapdataHouse05 from "./mapdata-house-05.jsonl";
 import mapdataSpot01 from "./mapdata-spot-01.jsonl";
 import mapdataSpot02 from "./mapdata-spot-02.jsonl";
 import { createMockApi } from "./shared-api.js";
@@ -108,6 +109,7 @@ async function readBodyWithLimit(request) {
 const historyFixtures = [
     ["mapdata-empty-04.jsonl", mapdataEmpty04],
     ["mapdata-house-03.jsonl", mapdataHouse03],
+    ["mapdata-house-05.jsonl", mapdataHouse05],
     ["mapdata-spot-01.jsonl", mapdataSpot01],
     ["mapdata-spot-02.jsonl", mapdataSpot02],
 ];

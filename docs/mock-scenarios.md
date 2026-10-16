@@ -78,6 +78,11 @@ Manual clean, combinable with each other or fault scenarios:
 - `msf` - manual mode active, forward stall, reverse to clear
 - `msr` - manual mode active, rear stall, move forward to clear
 
+Floor map:
+
+- `nomap` - no floor map stored yet (shows the "pin a cleaning run" picker); by default a demo map
+  with three rooms and one no-go zone is preloaded and guided runs are simulated
+
 LIDAR quality, combinable with any state:
 
 - `llq` - low scan quality, fewer than 90 valid points

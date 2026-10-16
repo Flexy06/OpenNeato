@@ -18,6 +18,11 @@ Everything you need to set up, configure, and troubleshoot OpenNeato.
 - [First-Time Setup](#first-time-setup)
     - [WiFi Setup](#wifi-setup)
     - [UART Pin Configuration](#uart-pin-configuration)
+- [Floor Map and Room Cleaning](#floor-map-and-room-cleaning)
+    - [Pinning a Map](#pinning-a-map)
+    - [Drawing Rooms and No-Go Zones](#drawing-rooms-and-no-go-zones)
+    - [Cleaning Selected Rooms](#cleaning-selected-rooms)
+    - [How It Works and Limitations](#how-it-works-and-limitations)
 - [Troubleshooting](#troubleshooting)
     - [Enabling Logging](#enabling-logging)
     - [Collecting Logs](#collecting-logs)
@@ -461,6 +466,62 @@ crossed: robot RX connects to ESP TX, and robot TX connects to ESP RX.
 
 If the dashboard stays at **Connecting -> Timeout**, verify the UART pins and the TX/RX
 crossover before troubleshooting the robot.
+
+## Floor Map and Room Cleaning
+
+> [!WARNING]
+> Experimental. Room cleaning is driven by the ESP32, not by the robot's own navigation. It has
+> been exercised in a host simulation (`firmware/test/guided_sim`) but needs testing on real
+> robots. Stay nearby for the first runs, and block stairs with a no-go zone **and** physically.
+
+The Botvac's own maps, zones and no-go lines are not reachable over the serial port, so OpenNeato
+builds on what it can see: the path recorded in the cleaning history.
+
+### Pinning a Map
+
+1. Run a normal **House** clean that starts and ends on the dock and covers the whole area.
+2. Open **Floor Map** (map icon on the dashboard) and pick that run, or open the run in
+   **Cleaning History** and tap **Use as floor map**.
+
+The pinned path is copied to its own file, so it survives history rotation. Pinning another run
+later keeps your rooms and no-go zones: every run starts on the dock, so all runs share the same
+coordinate frame. Moving the dock invalidates the map.
+
+### Drawing Rooms and No-Go Zones
+
+Switch to **Edit**:
+
+- **+ Room** / **+ No-go zone**, then drag a rectangle on the map
+- tap a zone to select it, drag its corners to reshape, drag inside to move it
+- **Add corner** splits the longest edge (for L-shaped rooms), **Remove corner** removes the
+  selected one
+- **Save map** writes everything to the ESP32 (up to 16 rooms and 16 no-go zones)
+
+### Cleaning Selected Rooms
+
+In **Clean**, tap rooms on the map (or the chips below it) and press **Clean N selected rooms**.
+The robot must be idle **on its dock**. The page and the dashboard show progress and the live
+position estimate; **Return to dock** ends cleaning early, **Stop** halts the robot in place.
+
+### How It Works and Limitations
+
+- **Route**: the recorded path from the dock up to the last point inside a selected room. Points
+  in or within ~28 cm of a no-go zone are dropped. Points inside a selected room are cleaned
+  (brush, vacuum and side brush on); transit stretches are shortcut in straight lines across
+  floor the robot already covered during the recording.
+- **Driving**: TestMode + `SetMotor`, stop-and-go segments (turn in place, drive at most 60 cm).
+- **Position**: wheel-encoder dead reckoning from the dock. Heading drift is corrected with a
+  LIDAR "wall compass" (the dominant wall direction of rectangular rooms); the LIDAR angle
+  direction is calibrated automatically with a short turn after leaving the dock. There is no
+  full relocalization, so position error still grows slowly with distance — keep runs to a few
+  rooms and pin a clean, complete run.
+- **Safety**: bumpers, wheel stall and the cliff sensors are polled continuously (stop, back off,
+  remember the obstacle, detour). A lifted robot aborts the run. Low battery (20 %), a 2 h limit or
+  repeated obstacles send the robot home.
+- **Docking**: the robot retraces its route to a point 45 cm in front of the dock, matches a LIDAR
+  scan against the one taken on the dock to correct its position, and backs onto the contacts. If
+  the contacts are not detected it hands over to the robot's own return-to-base.
+- Guided runs are not recorded in the cleaning history yet.
 
 ---
 

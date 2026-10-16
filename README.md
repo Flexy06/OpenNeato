@@ -50,6 +50,9 @@ port, giving you a local web interface that works without any external dependenc
   brush), bumper/wheel-lift/stall safety warnings
 - **Live cleaning map** — watch the robot's path during an active cleaning session in the History view, rendered on a
   canvas with coverage overlay
+- **Floor map with rooms and no-go zones** *(experimental, this fork)* — pin a recorded house clean as
+  the map, draw rooms and no-go zones on it, and let the ESP32 drive the robot through just the
+  selected rooms and back to the dock; see the [user guide](docs/user-guide.md#floor-map-and-room-cleaning)
 - **7-day cleaning scheduler** with two slots per day, managed entirely on the ESP32 (doesn't use the robot's built-in
   schedule commands)
 - **Cleaning history** with recorded robot paths rendered as coverage maps, session stats like duration, distance, area

@@ -2541,6 +2541,327 @@ input:disabled {
     margin-top: 6px;
 }
 
+/* Floor map — pinned map, rooms, no-go zones and guided room cleaning */
+
+.floormap-page {
+    padding-top: 4px;
+}
+
+.floormap-canvas.drawing {
+    cursor: crosshair;
+}
+
+.floormap-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    padding: 4px;
+    margin-bottom: 10px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+}
+
+.floormap-tab {
+    position: relative;
+    padding: 8px 0;
+    border: none;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.floormap-tab.active {
+    background: var(--surface-raised);
+    color: var(--text);
+}
+
+.floormap-tab:disabled {
+    opacity: 0.4;
+}
+
+.floormap-dirty-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-left: 6px;
+    border-radius: 50%;
+    background: var(--amber);
+    vertical-align: middle;
+}
+
+.floormap-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 12px;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--card-bg);
+}
+
+.floormap-panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.floormap-panel-title,
+.floormap-intro-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.floormap-intro {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-top: 8px;
+}
+
+.floormap-note {
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--text-dim);
+}
+
+.floormap-note.small {
+    font-size: 11px;
+}
+
+.floormap-link-btn {
+    border: none;
+    background: none;
+    padding: 4px 0;
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+}
+
+.floormap-link-btn.danger {
+    color: var(--red);
+}
+
+.floormap-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.floormap-chip {
+    --chip-color: var(--accent);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.floormap-chip.nogo {
+    --chip-color: var(--red);
+}
+
+.floormap-chip.on {
+    border-color: var(--chip-color);
+    background: color-mix(in srgb, var(--chip-color) 22%, var(--surface));
+}
+
+.floormap-chip-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--chip-color);
+}
+
+.floormap-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.floormap-btn {
+    flex: 1;
+    min-width: 0;
+    padding: 11px 12px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.floormap-btn.small {
+    flex: 0 1 auto;
+    padding: 7px 12px;
+    font-size: 12px;
+}
+
+.floormap-btn.wide {
+    width: 100%;
+}
+
+.floormap-btn.primary {
+    border-color: var(--border-accent);
+    background: var(--surface-raised);
+}
+
+.floormap-btn.armed {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.floormap-btn.danger {
+    border-color: rgba(255, 69, 58, 0.2);
+    background: rgba(255, 69, 58, 0.08);
+    color: var(--red);
+}
+
+.floormap-btn:disabled {
+    opacity: 0.35;
+}
+
+.floormap-btn:not(:disabled):active,
+.floormap-chip:active,
+.floormap-session:not(:disabled):active,
+.history-pin-btn:not(:disabled):active {
+    opacity: 0.7;
+}
+
+.floormap-zone-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.floormap-manage {
+    display: flex;
+    justify-content: space-between;
+    padding-top: 4px;
+    border-top: 1px solid var(--border);
+}
+
+.floormap-status {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+}
+
+.floormap-status.failed {
+    border-color: rgba(255, 69, 58, 0.35);
+}
+
+.floormap-status-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.floormap-status-phase {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.floormap-status.failed .floormap-status-phase {
+    color: var(--red);
+}
+
+.floormap-status-meta,
+.floormap-status-msg {
+    font-size: 12px;
+    color: var(--text-dim);
+}
+
+.floormap-progress {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--surface-raised);
+    overflow: hidden;
+}
+
+.floormap-progress-bar {
+    height: 100%;
+    border-radius: 3px;
+    background: var(--green);
+    transition: width 0.6s ease;
+}
+
+.floormap-sessions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.floormap-session {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+    color: var(--text);
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.floormap-session.current {
+    border-color: var(--accent);
+}
+
+.floormap-session-date {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.floormap-session-stats {
+    font-size: 12px;
+    color: var(--text-dim);
+    white-space: nowrap;
+}
+
+.history-pin-btn {
+    display: block;
+    margin: 10px auto 0;
+    padding: 8px 16px;
+    border: 1px solid var(--border-accent);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+}
+
 /* Motion player — playback controls + scrubber for the session replay */
 
 .history-player {

@@ -1,3 +1,13 @@
+import {
+    buildDemoFloorMap,
+    guidedHome,
+    guidedStatus,
+    guidedStop,
+    isGuidedActive,
+    startGuided,
+    validateFloorMap,
+} from "./shared-guided.js";
+
 const textEncoder = new TextEncoder();
 
 const defaultRand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
@@ -135,7 +145,10 @@ const syntheticLidarScan = (rand) => {
 };
 
 const deriveStates = (state) => {
-    if (state.manualClean) {
+    if (isGuidedActive(state, Date.now())) {
+        state.uiState = "UIMGR_STATE_GUIDEDCLEANING";
+        state.robotState = "ST_C_TestMode";
+    } else if (state.manualClean) {
         state.uiState = "UIMGR_STATE_MANUALCLEANING";
         state.robotState = "ST_C_ManualCleaning";
     } else if (state.midCleanRecharge) {
@@ -811,6 +824,60 @@ function createMockApi(context) {
             if (!cmd) return errorResponse("missing cmd", 400);
             await sleep(rand(50, 150));
             return textResponse(`${cmd}\r\nMock response for: ${cmd}\r\n\x1a`, 200, { "Content-Type": "text/plain" });
+        }
+
+        // -- Floor map + guided clean ---------------------------------------
+        if (path === "/api/floormap" || path.startsWith("/api/guided")) {
+            if (state.floorMap === undefined) {
+                state.floorMap = state.noFloorMap ? null : buildDemoFloorMap(context.historySessions);
+            }
+        }
+
+        if (method === "GET" && path === "/api/floormap") {
+            if (!state.floorMap) return errorResponse("no floor map", 404);
+            return textResponse(state.floorMap, 200, { "Content-Type": "text/plain" });
+        }
+
+        if (method === "PUT" && path === "/api/floormap") {
+            const doc = await request.text();
+            const err = validateFloorMap(doc);
+            if (err) return errorResponse(err, err === "map too large" ? 413 : 400);
+            state.floorMap = doc;
+            await sleep(rand(100, 300));
+            return okResponse();
+        }
+
+        if (method === "DELETE" && path === "/api/floormap") {
+            if (isGuidedActive(state, Date.now())) return errorResponse("guided clean is running", 409);
+            if (!state.floorMap) return errorResponse("no floor map", 404);
+            state.floorMap = null;
+            return okResponse();
+        }
+
+        if (method === "GET" && path === "/api/guided/status") {
+            return jsonResponse(guidedStatus(state, !!state.floorMap, Date.now()));
+        }
+
+        if (method === "POST" && path === "/api/guided") {
+            if (faults.actions) return errorResponse("Simulated action failure", 500);
+            const now = Date.now();
+            if (query.action === "start") {
+                if (!state.floorMap) return errorResponse("no floor map", 409);
+                if (isGuidedActive(state, now)) return errorResponse("guided clean already running", 409);
+                deriveStates(state);
+                if (state.uiState !== "UIMGR_STATE_IDLE") return errorResponse(`robot is busy (${state.uiState})`, 409);
+                const err = startGuided(state, state.floorMap, query.rooms, now);
+                return err ? errorResponse(err, 409) : okResponse();
+            }
+            if (query.action === "home") {
+                const err = guidedHome(state, now);
+                return err ? errorResponse(err, 409) : okResponse();
+            }
+            if (query.action === "stop") {
+                const err = guidedStop(state, now);
+                return err ? errorResponse(err, 409) : okResponse();
+            }
+            return errorResponse(query.action ? "unknown action" : "missing action", 400);
         }
 
         if (method === "GET" && path === "/api/history") return listHistory(context.historySessions, faults);

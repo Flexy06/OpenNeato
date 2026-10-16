@@ -5,6 +5,7 @@ import type {
     ChargerData,
     ErrorData,
     FirmwareVersion,
+    GuidedStatus,
     HistoryFileInfo,
     LidarScan,
     LogFileInfo,
@@ -82,6 +83,28 @@ async function fetchSessionData(filename: string): Promise<MapData[]> {
     const raw = await res.text();
     if (!raw.trim()) return [];
     return parseMapData(raw);
+}
+
+// Floor map is a text document (OFM1). 404 = no map stored yet.
+async function fetchFloorMap(): Promise<string | null> {
+    const res = await fetch("/api/floormap");
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(await parseError(res));
+    return res.text();
+}
+
+async function putFloorMap(doc: string): Promise<void> {
+    const res = await fetch("/api/floormap", {
+        method: "PUT",
+        headers: { "Content-Type": "text/plain" },
+        body: doc,
+    });
+    if (!res.ok) throw new Error(await parseError(res));
+}
+
+function guided(action: string, rooms?: number[]): Promise<void> {
+    const roomParam = rooms && rooms.length > 0 ? `&rooms=${rooms.join(",")}` : "";
+    return post(`/api/guided?action=${action}${roomParam}`);
 }
 
 function uploadFile(url: string, file: File, onProgress: (pct: number) => void): Promise<void> {
@@ -167,6 +190,14 @@ export const api = {
     uploadFirmware: (file: File, md5: string, onProgress: (pct: number) => void) =>
         uploadFirmware(file, md5, onProgress),
     saveSchedule: (patch: Partial<SettingsData>) => put<SettingsData>("/api/settings", patch),
+
+    getFloorMap: () => fetchFloorMap(),
+    saveFloorMap: (doc: string) => putFloorMap(doc),
+    deleteFloorMap: () => del("/api/floormap"),
+    getGuidedStatus: () => get<GuidedStatus>("/api/guided/status"),
+    guidedStart: (rooms: number[]) => guided("start", rooms),
+    guidedHome: () => guided("home"),
+    guidedStop: () => guided("stop"),
 
     getUserSettings: () => get<UserSettingsData>("/api/user-settings"),
     setUserSetting: (key: string, value: string) =>

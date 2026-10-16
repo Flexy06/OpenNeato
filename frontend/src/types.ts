@@ -7,6 +7,7 @@ export type {
     ChargerData,
     ErrorData,
     FirmwareVersion,
+    GuidedStatus,
     HistoryFileInfo,
     LidarPoint,
     LidarScan,

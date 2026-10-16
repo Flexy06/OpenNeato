@@ -32,6 +32,7 @@ const SCENARIOS = {
         extPwrPresent: true,
     },
     man: { manualClean: true },
+    nomap: { noFloorMap: true },
     mlf: { manualClean: true, manualLifted: true },
     mbf: { manualClean: true, manualBumperFrontLeft: true },
     mbs: { manualClean: true, manualBumperSideRight: true },

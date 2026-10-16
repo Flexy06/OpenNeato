@@ -2,11 +2,15 @@ import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import boltSvg from "../../assets/icons/bolt.svg?raw";
 import rotateLeftSvg from "../../assets/icons/rotate-left.svg?raw";
 import rotateRightSvg from "../../assets/icons/rotate-right.svg?raw";
+import { api } from "../../api";
 import { Icon } from "../../components/icon";
+import { useNavigate } from "../../components/router";
+import { floorMapFromSession, parseFloorMap, serializeFloorMap } from "../../floor-map";
 import { useMapGestures } from "../../hooks/use-map-gestures";
 import { T, useI18n } from "../../i18n";
 import { formatArea, formatDistance, type DistanceUnit } from "../../distance-units";
 import type { HistoryFileInfo, MapData } from "../../types";
+import { normalizeError } from "../../utils";
 import { renderMap } from "./helpers";
 import { Wave } from "./loading-wave";
 import { MotionPlayer } from "./motion-player";
@@ -17,6 +21,7 @@ interface HistoryItemViewProps {
     mapEmpty: boolean;
     recording: boolean;
     distanceUnit: DistanceUnit;
+    onError: (msg: string) => void;
 }
 
 // Persisted map rotation, in degrees. Always normalized to one of 0/90/180/270.
@@ -26,8 +31,29 @@ function loadRotation(): number {
     return (((Math.round(raw / 90) * 90) % 360) + 360) % 360;
 }
 
-export function HistoryItemView({ file, map, mapEmpty, recording, distanceUnit }: HistoryItemViewProps) {
+export function HistoryItemView({ file, map, mapEmpty, recording, distanceUnit, onError }: HistoryItemViewProps) {
     const { t, formatDuration, formatNumber } = useI18n();
+    const navigate = useNavigate();
+    const [pinning, setPinning] = useState(false);
+
+    // Pin this run as the floor map (keeps rooms / no-go zones of an existing
+    // map — every run starts on the dock, so the frames line up).
+    const pinAsFloorMap = useCallback(async () => {
+        if (!map) return;
+        setPinning(true);
+        try {
+            const existing = await api.getFloorMap();
+            const previous = existing ? parseFloorMap(existing) : null;
+            await api.saveFloorMap(serializeFloorMap(floorMapFromSession(file.name, map, previous)));
+            navigate("/map");
+        } catch (e: unknown) {
+            onError(normalizeError(e, "Failed to pin session"));
+        } finally {
+            setPinning(false);
+        }
+    }, [map, file.name, navigate, onError]);
+    const canPin =
+        !recording && map !== null && map.path.length > 1 && (file.session?.mode ?? map.session?.mode) === "house";
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [rotation, setRotation] = useState<number>(loadRotation);
     const transform = useMapGestures(canvasRef, rotation);
@@ -243,6 +269,16 @@ export function HistoryItemView({ file, map, mapEmpty, recording, distanceUnit }
                 <div class="history-map-hint">
                     <T>Pinch or scroll to zoom, drag to pan, double-tap to zoom in or reset</T>
                 </div>
+            )}
+            {canPin && (
+                <button
+                    type="button"
+                    class={`history-pin-btn${pinning ? " pending" : ""}`}
+                    onClick={pinAsFloorMap}
+                    disabled={pinning}
+                >
+                    <T>Use as floor map</T>
+                </button>
             )}
             {showPlayer && (
                 <div class="history-map-hint">

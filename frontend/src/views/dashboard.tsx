@@ -11,6 +11,7 @@ import historySvg from "../assets/icons/history.svg?raw";
 import houseSvg from "../assets/icons/house.svg?raw";
 import idleSvg from "../assets/icons/idle.svg?raw";
 import manualSvg from "../assets/icons/manual.svg?raw";
+import mapSvg from "../assets/icons/map.svg?raw";
 import pauseSvg from "../assets/icons/pause.svg?raw";
 import playSvg from "../assets/icons/play.svg?raw";
 import sparkleSvg from "../assets/icons/sparkle.svg?raw";
@@ -44,6 +45,7 @@ function statusInfo(s: string): StatusInfo {
     if (s.includes("CLEANINGPAUSED")) return { label: "Paused", color: "amber", icon: "alert" };
     if (s.includes("CLEANINGSUSPENDED")) return { label: "Recharging", color: "amber", icon: "bolt" };
     if (s.includes("MANUALCLEANING")) return { label: "Cleaning", color: "green", icon: "sparkle" };
+    if (s.includes("GUIDEDCLEANING")) return { label: "Room cleaning", color: "green", icon: "sparkle" };
     if (s.includes("DOCKING")) return { label: "Docking", color: "amber", icon: "bolt" };
     return { label: "Active", color: "green", icon: "check" };
 }
@@ -59,6 +61,7 @@ const STATUS_ICONS: Record<string, string> = {
 const MODE_ICONS: Record<string, string> = {
     idle: idleSvg,
     house: houseSvg,
+    map: mapSvg,
     spot: spotSvg,
     bolt: boltSvg,
     alert: alertSvg,
@@ -71,8 +74,10 @@ function modeInfo(
     isSpot: boolean,
     isCleaning: boolean,
     isManual: boolean,
+    isGuided: boolean,
 ): StatusInfo {
     if (isManual) return { label: "Manual", color: "blue", icon: "manual" };
+    if (isGuided) return { label: "Rooms", color: "blue", icon: "map" };
     if (charging) return { label: "Charging", color: "amber", icon: "bolt" };
     if (docked) return { label: "Docked", color: "amber", icon: "bolt" };
     if (isSpot) return { label: "Spot", color: "blue", icon: "spot" };
@@ -191,6 +196,7 @@ export function DashboardView({ firmware, state, isManual, updateInfo, robotRead
     const isSuspended = state.data?.uiState?.includes("CLEANINGSUSPENDED") ?? false;
     const isCleaning = isRunning || isPaused || isSuspended;
     const isSpot = state.data?.uiState?.includes("SPOT") ?? false;
+    const isGuided = state.data?.uiState?.includes("GUIDEDCLEANING") ?? false;
     const robotError = error.data?.hasError
         ? {
               kind: (error.data.kind === "warning" ? "warning" : "error") as "error" | "warning",
@@ -206,7 +212,7 @@ export function DashboardView({ firmware, state, isManual, updateInfo, robotRead
     const modeErr = (!state.data && state.error) || (!charger.data && charger.error);
     const mi = modeErr
         ? { label: "Error", color: "red", icon: "alert" }
-        : modeInfo(charging, docked, isSpot, isCleaning, isManual);
+        : modeInfo(charging, docked, isSpot, isCleaning, isManual, isGuided);
     const nextSchedule = schedule.data?.enabled ? nextScheduleLabel(schedule.data, t) : null;
 
     useEffect(() => {
@@ -230,6 +236,15 @@ export function DashboardView({ firmware, state, isManual, updateInfo, robotRead
                     {firmware.data?.hostname && <span class="header-hostname"> ({firmware.data.hostname})</span>}
                 </h1>
                 <div class="header-btns">
+                    <button
+                        type="button"
+                        class="header-right-btn"
+                        aria-label={t("Floor Map")}
+                        onClick={() => navigate("/map")}
+                        disabled={!robotReady}
+                    >
+                        <Icon svg={mapSvg} />
+                    </button>
                     <button
                         type="button"
                         class="header-right-btn"
@@ -414,7 +429,39 @@ export function DashboardView({ firmware, state, isManual, updateInfo, robotRead
             {/* Bottom action bar — always 3 buttons */}
             <div class="action-bar">
                 <div class="action-bar-row">
-                    {isCleaning ? (
+                    {isGuided ? (
+                        <>
+                            {/* Guided room clean (ESP32-driven): Map, Dock, Stop */}
+                            <button type="button" class="action-btn primary" onClick={() => navigate("/map")}>
+                                <Icon svg={mapSvg} />
+                                <T>Map</T>
+                            </button>
+                            <button
+                                type="button"
+                                class="action-btn"
+                                onClick={() =>
+                                    api
+                                        .guidedHome()
+                                        .catch((e: unknown) =>
+                                            actionErrorStack.push(normalizeError(e, "Action failed")),
+                                        )
+                                }
+                                disabled={offline || pending}
+                            >
+                                <Icon svg={dockSvg} />
+                                <T>Dock</T>
+                            </button>
+                            <button
+                                type="button"
+                                class={`action-btn${pending ? " pending" : ""}`}
+                                onClick={() => handleAction(api.guidedStop)}
+                                disabled={offline || pending}
+                            >
+                                <Icon svg={stopSvg} />
+                                <T>Stop</T>
+                            </button>
+                        </>
+                    ) : isCleaning ? (
                         <>
                             {/* Cleaning: Pause/Resume, Dock, Stop */}
                             <button

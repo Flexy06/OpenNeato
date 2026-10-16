@@ -329,7 +329,7 @@ String GuidedCleanManager::command(const String& action, const String& rooms) {
 
     if (action == "home") {
         if (phase == Phase::Running) {
-            beginReturn("user");
+            beginReturn("returned on request");
             return "";
         }
         if (phase == Phase::Returning || phase == Phase::Docking)
@@ -340,7 +340,7 @@ String GuidedCleanManager::command(const String& action, const String& rooms) {
     if (action == "stop") {
         if (!isActive())
             return "guided clean is not running";
-        finish(Phase::Stopped, "user");
+        finish(Phase::Stopped, "stopped by user");
         return "";
     }
 

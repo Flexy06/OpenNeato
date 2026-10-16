@@ -12,7 +12,11 @@ import { createScenarioState, scenarioFromRequest } from "./shared-state.js";
 import { DEFAULT_MOCK_VERSION, mockVersionFromHash } from "./shared-version.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const mockSourceFiles = new Set([join(__dirname, "shared-api.js"), join(__dirname, "shared-state.js")]);
+const mockSourceFiles = new Set([
+    join(__dirname, "shared-api.js"),
+    join(__dirname, "shared-guided.js"),
+    join(__dirname, "shared-state.js"),
+]);
 
 const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 
