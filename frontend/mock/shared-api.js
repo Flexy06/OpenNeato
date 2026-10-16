@@ -833,6 +833,28 @@ function createMockApi(context) {
             }
         }
 
+        if (method === "GET" && path === "/api/floormap/field") {
+            if (!state.floorField) return errorResponse("no localization field", 404);
+            return { status: 200, headers: { "Content-Type": "application/octet-stream" }, body: state.floorField };
+        }
+
+        if (method === "PUT" && path === "/api/floormap/field") {
+            const bytes = await request.bytes();
+            if (bytes.length < 26 || bytes[0] !== 0x4f || bytes[3] !== 0x31) {
+                return errorResponse("invalid localization field", 400);
+            }
+            if (bytes.length > 98304) return errorResponse("map too large", 413);
+            state.floorField = bytes;
+            return okResponse();
+        }
+
+        if (method === "POST" && path === "/api/floormap/record") {
+            if (isGuidedActive(state, Date.now()) || state.manualClean) return errorResponse("robot is busy", 409);
+            state.cleaning = true;
+            state.paused = false;
+            return okResponse();
+        }
+
         if (method === "GET" && path === "/api/floormap") {
             if (!state.floorMap) return errorResponse("no floor map", 404);
             return textResponse(state.floorMap, 200, { "Content-Type": "text/plain" });
@@ -851,6 +873,7 @@ function createMockApi(context) {
             if (isGuidedActive(state, Date.now())) return errorResponse("guided clean is running", 409);
             if (!state.floorMap) return errorResponse("no floor map", 404);
             state.floorMap = null;
+            state.floorField = null;
             return okResponse();
         }
 

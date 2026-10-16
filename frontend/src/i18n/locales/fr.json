@@ -485,5 +485,14 @@
   "no rooms defined on the map": "aucune pièce définie sur le plan",
   "the dock lies inside a no-go zone": "la base se trouve dans une zone interdite",
   "guided clean is not running": "le nettoyage par pièce n’est pas en cours",
-  "robot not responding": "le robot ne répond pas"
+  "robot not responding": "le robot ne répond pas",
+  "LIDAR map": "Carte LIDAR",
+  "Map lock {score}%": "Recalage carte {score}%",
+  "Record a LIDAR map": "Enregistrer une carte LIDAR",
+  "For reliable room cleaning the robot needs a wall map: start a mapping run from the dock. It is a normal house clean that also records LIDAR scans. When it is back on the dock, pick it below.": "Pour un nettoyage fiable par pièce, le robot a besoin d'une carte des murs : lancez un passage de cartographie depuis la base. C'est un nettoyage complet normal qui enregistre aussi les scans LIDAR. Une fois le robot revenu sur sa base, sélectionnez-le ci-dessous.",
+  "Mapping run started. Come back when the robot has returned to the dock.": "Cartographie lancée. Revenez quand le robot est de retour sur sa base.",
+  "Start mapping run": "Lancer la cartographie",
+  "robot is busy": "le robot est occupé",
+  "no localization field": "aucun champ de localisation",
+  "invalid localization field": "champ de localisation invalide"
 }

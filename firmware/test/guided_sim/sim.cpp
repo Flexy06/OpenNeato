@@ -89,6 +89,58 @@ static double rectDist(double x, double y, double x0, double y0, double x1, doub
     return std::hypot(dx, dy);
 }
 
+// Likelihood field from the world walls, like the frontend builds from a mapping run
+static std::string buildField(const NeatoSerial& s) {
+    const int cell = 50;
+    double minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
+    for (auto& w: s.walls) {
+        minX = std::min({minX, w.ax, w.bx});
+        maxX = std::max({maxX, w.ax, w.bx});
+        minY = std::min({minY, w.ay, w.by});
+        maxY = std::max({maxY, w.ay, w.by});
+    }
+    int ox = static_cast<int>(minX) - 500, oy = static_cast<int>(minY) - 500;
+    int w = static_cast<int>((maxX - minX + 1000) / cell) + 1, h = static_cast<int>((maxY - minY + 1000) / cell) + 1;
+    std::vector<std::pair<int, int>> occ;
+    std::vector<uint8_t> mark(static_cast<size_t>(w * h), 0);
+    for (auto& wl: s.walls) {
+        double len = std::hypot(wl.bx - wl.ax, wl.by - wl.ay);
+        for (double t = 0; t <= len; t += 20) {
+            int cx = static_cast<int>((wl.ax + (wl.bx - wl.ax) * t / len - ox) / cell);
+            int cy = static_cast<int>((wl.ay + (wl.by - wl.ay) * t / len - oy) / cell);
+            if (cx >= 0 && cy >= 0 && cx < w && cy < h && !mark[cy * w + cx]) {
+                mark[cy * w + cx] = 1;
+                occ.push_back({cx, cy});
+            }
+        }
+    }
+    std::string out = "OFL1";
+    auto put32 = [&](int32_t v) { for (int i = 0; i < 4; i++) out += static_cast<char>((v >> (8 * i)) & 255); };
+    auto put16 = [&](int16_t v) { out += static_cast<char>(v & 255); out += static_cast<char>((v >> 8) & 255); };
+    put32(ox);
+    put32(oy);
+    put16(cell);
+    put16(static_cast<int16_t>(w));
+    put16(static_cast<int16_t>(h));
+    out += static_cast<char>(s.ldsSign);
+    out += '\0';
+    put16(0);
+    put16(static_cast<int16_t>(s.ldsOffset));
+    put16(0);
+    for (int cy = 0; cy < h; cy++)
+        for (int cx = 0; cx < w; cx++) {
+            double best = 1e9;
+            for (auto& o: occ) {
+                double d = std::hypot(o.first - cx, o.second - cy) * cell;
+                if (d < best) best = d;
+            }
+            out += static_cast<char>(static_cast<uint8_t>(std::max(0.0, 255.0 * (1.0 - best / 300.0))));
+        }
+    return out;
+}
+
+static bool g_useField = true;
+
 static Result runScenario(const char *name, const char *rooms, std::function<void(NeatoSerial&)> tweak) {
     std::printf("\n=== %s (rooms=%s) ===\n", name, rooms);
     g_simMillis = 1;
@@ -110,6 +162,16 @@ static Result runScenario(const char *name, const char *rooms, std::function<voi
     if (!map.endUpload()) {
         std::printf("upload rejected: %s\n", map.getUploadError().c_str());
         std::exit(1);
+    }
+    SPIFFS.remove("/map/field.bin");
+    if (g_useField && !serial.walls.empty()) {
+        std::string fld = buildField(serial);
+        assert(map.beginUpload(fld.size(), true));
+        assert(map.writeChunk(reinterpret_cast<const uint8_t *>(fld.data()), fld.size()));
+        if (!map.endUpload()) {
+            std::printf("field rejected: %s\n", map.getUploadError().c_str());
+            std::exit(1);
+        }
     }
 
     String err = guided.command("start", rooms);
@@ -249,6 +311,20 @@ int main(int argc, char **argv) {
     Result m = runScenario("room 1 only (recording detours via room 2)", "1", [](NeatoSerial&) {});
     expect(m.phase == "done" && m.docked, "completes and docks");
     expect(m.maxX < 3000 - 100, "never drives into room 2");
+
+    // 11. Heavy drift (2% wheel slip, 4% wheelbase error): map localization must hold
+    Result hd = runScenario("heavy drift with map", "2", [](NeatoSerial& s) {
+        s.slipR = 1.02;
+        s.wheelBase = 258;
+    });
+    expect(hd.phase == "done" && hd.docked, "completes and docks under heavy drift");
+    expect(hd.minNogoDist > 0, "avoids no-go under heavy drift");
+
+    // 12. Same scenario without a map: compass fallback still works for the basics
+    g_useField = false;
+    Result nf = runScenario("no map field (compass fallback)", "2", [](NeatoSerial&) {});
+    expect(nf.phase == "done", "compass fallback completes");
+    g_useField = true;
 
     // 9. LIDAR mounted behind the centre + furniture the recording never touched
     Result k = runScenario("lidar offset + furniture", "1,2", [](NeatoSerial& s) {

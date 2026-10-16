@@ -58,13 +58,53 @@ export function SessionPicker({ current, busy, onPick, onError }: SessionPickerP
                     disabled={busy}
                     onClick={() => onPick(f)}
                 >
-                    <span class="floormap-session-date">{f.session ? formatDateTime(f.session.time) : f.name}</span>
+                    <span class="floormap-session-date">
+                        {f.session ? formatDateTime(f.session.time) : f.name}
+                        {f.session?.scans && (
+                            <span class="floormap-badge">
+                                <T>LIDAR map</T>
+                            </span>
+                        )}
+                    </span>
                     <span class="floormap-session-stats">
                         {f.summary ? formatDuration(f.summary.duration) : ""}
                         {f.summary ? ` · ${formatNumber(f.summary.areaCovered, { maximumFractionDigits: 1 })} m²` : ""}
                     </span>
                 </button>
             ))}
+        </div>
+    );
+}
+
+// -- Mapping run (house clean that records LIDAR scans) -------------------------
+
+interface MappingCardProps {
+    started: boolean;
+    robotIdle: boolean;
+    onStart: () => void;
+}
+
+export function MappingCard({ started, robotIdle, onStart }: MappingCardProps) {
+    return (
+        <div class="floormap-panel floormap-mapping">
+            <div class="floormap-panel-title">
+                <T>Record a LIDAR map</T>
+            </div>
+            <div class="floormap-note">
+                <T>
+                    For reliable room cleaning the robot needs a wall map: start a mapping run from the dock. It is a
+                    normal house clean that also records LIDAR scans. When it is back on the dock, pick it below.
+                </T>
+            </div>
+            {started ? (
+                <div class="floormap-note small">
+                    <T>Mapping run started. Come back when the robot has returned to the dock.</T>
+                </div>
+            ) : (
+                <button type="button" class="floormap-btn primary wide" onClick={onStart} disabled={!robotIdle}>
+                    <T>Start mapping run</T>
+                </button>
+            )}
         </div>
     );
 }
@@ -157,6 +197,8 @@ export function CleanPanel({
                         <span class="floormap-status-meta">
                             {formatDuration(status.elapsed)}
                             {status.obstacles > 0 && ` · ${t("{count} obstacles", { count: status.obstacles })}`}
+                            {status.localization === "map" &&
+                                ` · ${t("Map lock {score}%", { score: Math.round(status.locScore * 100) })}`}
                         </span>
                     </div>
                     {(active || status.phase === "done") && (

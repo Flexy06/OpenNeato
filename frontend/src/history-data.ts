@@ -7,6 +7,7 @@ import type {
     MapData,
     MapPathPoint,
     MapRechargePoint,
+    MapScan,
     MapSession,
     MapSummary,
 } from "./types";
@@ -72,8 +73,32 @@ export function parseMapData(raw: string): MapData[] {
     return chunks.map(buildSession).filter((m) => m.path.length > 0);
 }
 
+interface RawScan {
+    type: "scan";
+    x: number;
+    y: number;
+    t: number;
+    d: string;
+}
+
 // Union of all line types that can appear in a session JSONL
-type SessionLine = MapSession | MapSummary | RawPose | (MapRechargePoint & { type: "recharge" });
+type SessionLine = MapSession | MapSummary | RawPose | (MapRechargePoint & { type: "recharge" }) | RawScan;
+
+function isScan(l: SessionLine): l is RawScan {
+    return "type" in l && (l as { type: string }).type === "scan";
+}
+
+function decodeScan(l: RawScan): MapScan | null {
+    try {
+        const bin = atob(l.d);
+        if (bin.length !== 180) return null;
+        const bins = new Uint8Array(180);
+        for (let i = 0; i < 180; i++) bins[i] = bin.charCodeAt(i);
+        return { x: l.x, y: l.y, t: l.t, bins };
+    } catch {
+        return null;
+    }
+}
 
 function isSession(l: SessionLine): l is MapSession {
     return "type" in l && (l as MapSession).type === "session";
@@ -114,10 +139,23 @@ function buildSession(lines: string[]): MapData {
 
     const session: MapSession | null = parsed.find(isSession) ?? null;
     const summary: MapSummary | null = parsed.find(isSummary) ?? null;
+    const scans: MapScan[] = parsed
+        .filter(isScan)
+        .map(decodeScan)
+        .filter((sc): sc is MapScan => sc !== null);
     const rawPoses: RawPose[] = parsed.filter(isPose).filter((l) => l.x !== 0 || l.y !== 0 || l.t !== 0);
 
     if (rawPoses.length === 0) {
-        return { session, summary, path: [], coverage: [], recharges: [], bounds: null, cellSize: CELL_SIZE_M };
+        return {
+            session,
+            summary,
+            path: [],
+            coverage: [],
+            recharges: [],
+            bounds: null,
+            cellSize: CELL_SIZE_M,
+            scans,
+        };
     }
 
     // Firmware records `ts` as seconds since boot, not session start, so
@@ -208,5 +246,5 @@ function buildSession(lines: string[]): MapData {
         maxY: Math.max(...ys) + pad,
     };
 
-    return { session, summary, path, coverage, recharges, bounds, cellSize: CELL_SIZE_M };
+    return { session, summary, path, coverage, recharges, bounds, cellSize: CELL_SIZE_M, scans };
 }

@@ -479,9 +479,16 @@ builds on what it can see: the path recorded in the cleaning history.
 
 ### Pinning a Map
 
-1. Run a normal **House** clean that starts and ends on the dock and covers the whole area.
-2. Open **Floor Map** (map icon on the dashboard) and pick that run, or open the run in
-   **Cleaning History** and tap **Use as floor map**.
+1. Put the robot on its dock, open **Floor Map** (map icon on the dashboard) and tap
+   **Start mapping run**. This is a normal **House** clean during which the ESP32 additionally
+   records a LIDAR scan together with the robot's own position every few seconds.
+2. When the robot is back on the dock, pick that run in **Floor Map** (it carries a
+   **LIDAR map** badge), or open it in **Cleaning History** and tap **Use as floor map**.
+
+Pinning a mapping run also builds a wall map from the scans (calibrating how the LIDAR is mounted
+automatically) and uploads it to the ESP32 as a localization field. The walls are drawn under the
+path in the editor. Any other complete house clean can be pinned too, but without the wall map the
+robot falls back to dead reckoning plus the wall compass and its position drifts noticeably.
 
 The pinned path is copied to its own file, so it survives history rotation. Pinning another run
 later keeps your rooms and no-go zones: every run starts on the dock, so all runs share the same
@@ -510,16 +517,19 @@ position estimate; **Return to dock** ends cleaning early, **Stop** halts the ro
   Between runs and on the way home the robot takes the shortest path over floor it covered during
   the recording (BFS on a 20 cm grid), so it never replays detours through other rooms.
 - **Driving**: TestMode + `SetMotor`, stop-and-go segments (turn in place, drive at most 60 cm).
-- **Position**: wheel-encoder dead reckoning from the dock. Heading drift is corrected with a
-  LIDAR "wall compass" (the dominant wall direction of rectangular rooms); the LIDAR angle
-  direction is calibrated automatically with a short turn after leaving the dock. There is no
-  full relocalization, so position error still grows slowly with distance — keep runs to a few
-  rooms and pin a clean, complete run.
+- **Position**: wheel-encoder dead reckoning from the dock, corrected by matching LIDAR scans
+  against the wall map of the mapping run (correlative scan matching, a new fix every 40 cm or
+  30° of travel). The first fix happens on the dock. The status line shows **Map lock N %**, the
+  match quality of the last fix. Without a wall map, heading drift is only corrected by a LIDAR
+  "wall compass" (dominant wall direction of rectangular rooms), and position error grows with
+  distance. Moving furniture a lot after the mapping run lowers the match quality; record a new
+  mapping run then (rooms and no-go zones are kept).
 - **Safety**: bumpers, wheel stall and the cliff sensors are polled continuously (stop, back off,
   remember the obstacle, detour). A lifted robot aborts the run. Low battery (20 %), a 2 h limit or
   repeated obstacles send the robot home.
 - **Docking**: the robot drives to a staging point 90 cm in front of the dock, turns to the dock
-  heading and matches a LIDAR scan against the one taken on the dock to correct its position. It
+  heading and matches a LIDAR scan against the wall map (or, without one, against the scan taken on
+  the dock) to correct its position. It
   then reverses along the dock axis, steering its rear onto the line, re-checks the alignment with a
   second scan 30 cm out and backs straight onto the contacts. A miss triggers one more line-up;
   after that it hands over to the robot's own return-to-base.

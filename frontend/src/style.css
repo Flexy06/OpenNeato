@@ -2863,6 +2863,19 @@ input:disabled {
     white-space: nowrap;
 }
 
+.floormap-badge {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    background: var(--accent-grad);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    vertical-align: middle;
+}
+
 .history-pin-btn {
     display: block;
     margin: 10px auto 0;

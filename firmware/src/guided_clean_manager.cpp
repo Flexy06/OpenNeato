@@ -725,6 +725,7 @@ void GuidedCleanManager::freePlan() {
     std::vector<Run>().swap(runs);
     std::vector<MapPoint>().swap(crumbs);
     grid.clear();
+    field = LocField();
     curRun = -1;
     fallbackHome = false;
     std::vector<MapZone>().swap(nogos);
@@ -752,6 +753,8 @@ String GuidedCleanManager::command(const String& action, const String& rooms) {
         err = buildPlan(map, rooms);
         if (!err.isEmpty())
             return err;
+        if (!floorMap.loadField(field))
+            field = LocField();
 
         runGen++;
         phase = Phase::Starting;
@@ -770,6 +773,9 @@ String GuidedCleanManager::command(const String& action, const String& rooms) {
         ldsOn = false;
         compassTried = false;
         compassRef = false;
+        locInit = false;
+        locFixes = 0;
+        locScore = 0.0f;
         refScanValid = false;
         dockIcpTries = 0;
         compassSign = 0;
@@ -1230,9 +1236,26 @@ void GuidedCleanManager::selectNextTarget() {
 }
 
 void GuidedCleanManager::step() {
-    // Wall compass: reference scan on the dock once the LIDAR has spun up,
-    // then periodic re-alignment while stopped between segments.
-    if (ldsOn && !compassTried) {
+    // Map localization (preferred): first fix on the dock once the LIDAR spins,
+    // then a scan match at every stop after some travel or turning.
+    if (field.valid() && ldsOn) {
+        if (!locInit) {
+            if (millis() < ldsReadyAtMs)
+                return;
+            locInit = true;
+            requestLocScan(GUIDED_LOC_START_RADIUS_MM, GUIDED_LOC_START_ANGLE_DEG, 0xFF);
+            return;
+        }
+        if ((distSinceFix >= GUIDED_LOC_EVERY_MM || turnSinceFix >= GUIDED_LOC_EVERY_DEG * DEG) &&
+            millis() - lastScanMs >= 1600 && phase != Phase::Docking) {
+            requestLocScan(GUIDED_LOC_RADIUS_MM, GUIDED_LOC_ANGLE_DEG, 0xFF);
+            return;
+        }
+    }
+
+    // Wall compass (fallback without a map): reference scan on the dock once the
+    // LIDAR has spun up, then periodic re-alignment while stopped between segments.
+    if (ldsOn && !compassTried && !field.valid()) {
         if (millis() < ldsReadyAtMs)
             return;
         compassTried = true;
@@ -1242,7 +1265,7 @@ void GuidedCleanManager::step() {
     // Direction calibration: once clear of the dock, turn to a heading of
     // ~22.5° (mod 45°) where CW and CCW LIDAR angle conventions disagree most,
     // scan, and lock the sign. Retried up to 3 times along the route.
-    if (compassRef && compassSign == 0 && phase == Phase::Running && calAttempts < 3 &&
+    if (!field.valid() && compassRef && compassSign == 0 && phase == Phase::Running && calAttempts < 3 &&
         sqrtf(poseX * poseX + poseY * poseY) > 300.0f) {
         if (calStage == 0) {
             float target = roundf((poseTheta / DEG - 22.5f) / 45.0f) * 45.0f + 22.5f;
@@ -1261,7 +1284,7 @@ void GuidedCleanManager::step() {
             return;
         }
     }
-    if (compassRef && compassSign != 0 &&
+    if (!field.valid() && compassRef && compassSign != 0 &&
         (distSinceFix >= GUIDED_COMPASS_EVERY_MM || turnSinceFix >= GUIDED_COMPASS_EVERY_DEG * DEG) &&
         millis() - lastScanMs >= 2000) {
         requestScan(false);
@@ -1394,7 +1417,7 @@ void GuidedCleanManager::beginDocking() {
 void GuidedCleanManager::stepDocking() {
     const float staging = GUIDED_DOCK_STAGING_MM;
     const float preback = GUIDED_DOCK_PREBACK_MM;
-    bool canMatch = refScanValid && compassSign != 0;
+    bool canMatch = field.valid() || (refScanValid && compassSign != 0);
 
     auto faceZero = [this](float tolDeg) {
         float err = wrapAngle(0.0f - poseTheta);
@@ -1706,9 +1729,163 @@ void GuidedCleanManager::applyCompass(const LdsScanData& scan, bool reference) {
         LOG("GUIDED", "Compass: heading corrected by %.1f° (conf %.2f)", lastFixDeg, conf);
 }
 
+// -- Map localization -----------------------------------------------------------------------
+
+void GuidedCleanManager::requestLocScan(int radiusMM, int angleDeg, uint8_t resumeStage) {
+    uint32_t gen = runGen;
+    waitingCmd = true;
+    lastScanMs = millis();
+    serial.getLdsScan([this, gen, radiusMM, angleDeg, resumeStage](bool ok, const LdsScanData& scan) {
+        if (gen != runGen)
+            return;
+        waitingCmd = false;
+        distSinceFix = 0.0f;
+        turnSinceFix = 0.0f;
+        if (resumeStage != 0xFF)
+            dockStage = resumeStage;
+        if (ok)
+            matchField(scan, radiusMM, angleDeg);
+    });
+}
+
+// Correlative scan matching: score candidate poses by summing the likelihood
+// field under the scan points. Coarse grid search (field cells × 2° steps),
+// then a bilinear refinement around the best candidate. Integer cell offsets
+// in the coarse stage keep this to a few ms on the ESP32.
+bool GuidedCleanManager::matchField(const LdsScanData& scan, int radiusMM, int angleDeg) {
+    // Scan points in the robot frame (LIDAR mounting from the map calibration)
+    float px[180];
+    float py[180];
+    int n = 0;
+    auto sgn = static_cast<float>(field.lidarSign);
+    for (int i = 0; i < 360 && n < 180; i += 2) {
+        const LdsScanPoint& p = scan.points[i];
+        if (p.errorCode != 0 || p.distMM < 150 || p.distMM > 5000)
+            continue;
+        float a = sgn * static_cast<float>(p.angleDeg) * DEG + field.lidarAngleOffsetRad;
+        px[n] = static_cast<float>(field.lidarOffsetX) + static_cast<float>(p.distMM) * cosf(a);
+        py[n] = static_cast<float>(p.distMM) * sinf(a);
+        n++;
+    }
+    if (n < 40) {
+        LOG("GUIDED", "Loc: too few scan points (%d)", n);
+        return false;
+    }
+
+    const auto cell = static_cast<float>(field.cell);
+    const int steps = radiusMM / field.cell;
+    float bestScore = -1.0f;
+    float bestT = poseTheta;
+    float bestX = poseX;
+    float bestY = poseY;
+    int bx[180];
+    int by[180];
+    for (int da = -angleDeg; da <= angleDeg; da += 2) {
+        float th = poseTheta + static_cast<float>(da) * DEG;
+        float c = cosf(th);
+        float s = sinf(th);
+        for (int i = 0; i < n; i++) {
+            float wx = poseX + c * px[i] - s * py[i];
+            float wy = poseY + s * px[i] + c * py[i];
+            bx[i] = static_cast<int>(floorf((wx - static_cast<float>(field.originX)) / cell));
+            by[i] = static_cast<int>(floorf((wy - static_cast<float>(field.originY)) / cell));
+        }
+        for (int ky = -steps; ky <= steps; ky++) {
+            for (int kx = -steps; kx <= steps; kx++) {
+                int sum = 0;
+                for (int i = 0; i < n; i++) {
+                    int cx = bx[i] + kx;
+                    int cy = by[i] + ky;
+                    if (cx < 0 || cy < 0 || cx >= field.w || cy >= field.h)
+                        continue;
+                    sum += field.data[static_cast<size_t>(cy) * static_cast<size_t>(field.w) + static_cast<size_t>(cx)];
+                }
+                // Slight preference for small corrections breaks ties on repetitive walls
+                float score = static_cast<float>(sum) - static_cast<float>(abs(kx) + abs(ky) + abs(da) / 2) * 2.0f;
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestT = th;
+                    bestX = poseX + static_cast<float>(kx) * cell;
+                    bestY = poseY + static_cast<float>(ky) * cell;
+                }
+            }
+        }
+    }
+
+    // Refinement with bilinear sampling (sub-cell precision)
+    auto sample = [this](float x, float y) {
+        float fx = (x - static_cast<float>(field.originX)) / static_cast<float>(field.cell) - 0.5f;
+        float fy = (y - static_cast<float>(field.originY)) / static_cast<float>(field.cell) - 0.5f;
+        int x0 = static_cast<int>(floorf(fx));
+        int y0 = static_cast<int>(floorf(fy));
+        float tx = fx - static_cast<float>(x0);
+        float ty = fy - static_cast<float>(y0);
+        auto v = [this](int cx, int cy) -> float {
+            if (cx < 0 || cy < 0 || cx >= field.w || cy >= field.h)
+                return 0.0f;
+            return field.data[static_cast<size_t>(cy) * static_cast<size_t>(field.w) + static_cast<size_t>(cx)];
+        };
+        return (v(x0, y0) * (1 - tx) + v(x0 + 1, y0) * tx) * (1 - ty) +
+               (v(x0, y0 + 1) * (1 - tx) + v(x0 + 1, y0 + 1) * tx) * ty;
+    };
+    auto scoreAt = [&](float x, float y, float th) {
+        float c = cosf(th);
+        float s = sinf(th);
+        float sum = 0.0f;
+        for (int i = 0; i < n; i++)
+            sum += sample(x + c * px[i] - s * py[i], y + s * px[i] + c * py[i]);
+        return sum;
+    };
+    float refined = scoreAt(bestX, bestY, bestT);
+    float step = cell / 2.0f;
+    float astep = 1.0f * DEG;
+    for (int iter = 0; iter < 6; iter++) {
+        bool improved = false;
+        const float cand[6][3] = {{step, 0, 0},  {-step, 0, 0}, {0, step, 0},
+                                  {0, -step, 0}, {0, 0, astep}, {0, 0, -astep}};
+        for (const auto& d: cand) {
+            float sc = scoreAt(bestX + d[0], bestY + d[1], bestT + d[2]);
+            if (sc > refined) {
+                refined = sc;
+                bestX += d[0];
+                bestY += d[1];
+                bestT += d[2];
+                improved = true;
+            }
+        }
+        if (!improved) {
+            step /= 2.0f;
+            astep /= 2.0f;
+        }
+    }
+
+    float norm = refined / (static_cast<float>(n) * 255.0f);
+    float before = scoreAt(poseX, poseY, poseTheta) / (static_cast<float>(n) * 255.0f);
+    locScore = norm;
+    if (norm < GUIDED_LOC_MIN_SCORE || norm + 0.02f < before) {
+        LOG("GUIDED", "Loc: rejected (score %.2f, at odometry pose %.2f)", norm, before);
+        return false;
+    }
+    float dx = bestX - poseX;
+    float dy = bestY - poseY;
+    float dt = wrapAngle(bestT - poseTheta);
+    poseX = bestX;
+    poseY = bestY;
+    poseTheta = wrapAngle(bestT);
+    locFixes++;
+    if (fabsf(dx) + fabsf(dy) > 60.0f || fabsf(dt) > 2.0f * DEG)
+        LOG("GUIDED", "Loc: corrected %.0f,%.0f mm %.1f° (score %.2f)", dx, dy, dt / DEG, norm);
+    return true;
+}
+
 // -- Dock homing (ICP against the reference scan) ------------------------------------------
 
 void GuidedCleanManager::requestIcpScan(uint8_t resumeStage) {
+    if (field.valid()) {
+        dockStage = 3;
+        requestLocScan(GUIDED_LOC_RADIUS_MM, GUIDED_LOC_ANGLE_DEG, resumeStage);
+        return;
+    }
     uint32_t gen = runGen;
     waitingCmd = true;
     dockStage = 3;
@@ -1912,6 +2089,9 @@ String GuidedCleanManager::getStatusJson() const {
             {"compass", compassRef ? (compassSign != 0 ? "locked" : "reference") : (ldsOn ? "pending" : "off"),
              FIELD_STRING},
             {"compassFixes", String(compassFixes), FIELD_INT},
+            {"localization", field.valid() ? "map" : (compassRef ? "compass" : "odometry"), FIELD_STRING},
+            {"locFixes", String(locFixes), FIELD_INT},
+            {"locScore", String(locScore, 2), FIELD_FLOAT},
     };
     if (isActive() && !route.empty() && targetIdx < route.size()) {
         fields.push_back({"targetX", String(static_cast<float>(route[targetIdx].x) / 1000.0f, 3), FIELD_FLOAT});

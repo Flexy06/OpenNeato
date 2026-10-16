@@ -239,6 +239,15 @@ private:
     bool refScanValid = false;
     int dockIcpTries = 0;
     void requestIcpScan(uint8_t resumeStage);
+
+    // -- LIDAR localization against the mapping-run field ----------------------------
+    LocField field;
+    bool locInit = false;
+    int locFixes = 0;
+    float locScore = 0.0f;
+    void requestLocScan(int radiusMM, int angleDeg, uint8_t resumeStage);
+    // Correlative scan match around the current pose; updates the pose on success
+    bool matchField(const LdsScanData& scan, int radiusMM, int angleDeg);
     bool matchReference(const LdsScanData& scan, float& corrX, float& corrY, float& corrT) const;
     void applyCompass(const LdsScanData& scan, bool reference);
     static bool dominantWallAngle(const LdsScanData& scan, float& phi, float& conf);

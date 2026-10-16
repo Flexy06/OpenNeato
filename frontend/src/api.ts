@@ -102,6 +102,22 @@ async function putFloorMap(doc: string): Promise<void> {
     if (!res.ok) throw new Error(await parseError(res));
 }
 
+async function fetchLocField(): Promise<ArrayBuffer | null> {
+    const res = await fetch("/api/floormap/field");
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(await parseError(res));
+    return res.arrayBuffer();
+}
+
+async function putLocField(data: Uint8Array): Promise<void> {
+    const res = await fetch("/api/floormap/field", {
+        method: "PUT",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: new Blob([data as Uint8Array<ArrayBuffer>]),
+    });
+    if (!res.ok) throw new Error(await parseError(res));
+}
+
 function guided(action: string, rooms?: number[]): Promise<void> {
     const roomParam = rooms && rooms.length > 0 ? `&rooms=${rooms.join(",")}` : "";
     return post(`/api/guided?action=${action}${roomParam}`);
@@ -194,6 +210,9 @@ export const api = {
     getFloorMap: () => fetchFloorMap(),
     saveFloorMap: (doc: string) => putFloorMap(doc),
     deleteFloorMap: () => del("/api/floormap"),
+    getLocField: () => fetchLocField(),
+    saveLocField: (data: Uint8Array) => putLocField(data),
+    startMappingRun: () => post("/api/floormap/record"),
     getGuidedStatus: () => get<GuidedStatus>("/api/guided/status"),
     guidedStart: (rooms: number[]) => guided("start", rooms),
     guidedHome: () => guided("home"),

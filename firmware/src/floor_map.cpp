@@ -93,6 +93,65 @@ void FloorMap::begin() {
     // Clean up a temp file left behind by an interrupted upload.
     if (SPIFFS.exists(FLOORMAP_TMP_FILE))
         SPIFFS.remove(FLOORMAP_TMP_FILE);
+    if (SPIFFS.exists(FLOORMAP_FIELD_TMP_FILE))
+        SPIFFS.remove(FLOORMAP_FIELD_TMP_FILE);
+}
+
+bool FloorMap::hasField() const {
+    return SPIFFS.exists(FLOORMAP_FIELD_FILE);
+}
+
+std::shared_ptr<LogReader> FloorMap::readField() {
+    File f = SPIFFS.open(FLOORMAP_FIELD_FILE, FILE_READ);
+    if (!f)
+        return nullptr;
+    return std::make_shared<PlainLogReader>(std::move(f));
+}
+
+static int32_t rd32(const uint8_t *p) {
+    return static_cast<int32_t>(static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
+                                (static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24));
+}
+
+static int16_t rd16(const uint8_t *p) {
+    return static_cast<int16_t>(static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8));
+}
+
+static const size_t FIELD_HEADER = 26;
+
+// Parse header + body; on success `out` holds the field
+static bool parseField(File& f, LocField& out) {
+    uint8_t hdr[FIELD_HEADER];
+    if (f.read(hdr, FIELD_HEADER) != static_cast<int>(FIELD_HEADER))
+        return false;
+    if (hdr[0] != 'O' || hdr[1] != 'F' || hdr[2] != 'L' || hdr[3] != '1')
+        return false;
+    out.originX = rd32(hdr + 4);
+    out.originY = rd32(hdr + 8);
+    out.cell = static_cast<uint16_t>(rd16(hdr + 12));
+    out.w = static_cast<uint16_t>(rd16(hdr + 14));
+    out.h = static_cast<uint16_t>(rd16(hdr + 16));
+    out.lidarSign = static_cast<int8_t>(hdr[18]) < 0 ? -1 : 1;
+    out.lidarAngleOffsetRad = static_cast<float>(rd16(hdr + 20)) * 0.1f * 3.14159265f / 180.0f;
+    out.lidarOffsetX = rd16(hdr + 22);
+    size_t n = static_cast<size_t>(out.w) * static_cast<size_t>(out.h);
+    if (out.cell < 10 || out.w == 0 || out.h == 0 || n + FIELD_HEADER > FLOORMAP_FIELD_MAX_BYTES)
+        return false;
+    out.data.resize(n);
+    if (f.read(out.data.data(), n) != static_cast<int>(n)) {
+        std::vector<uint8_t>().swap(out.data);
+        return false;
+    }
+    return true;
+}
+
+bool FloorMap::loadField(LocField& out) const {
+    File f = SPIFFS.open(FLOORMAP_FIELD_FILE, FILE_READ);
+    if (!f)
+        return false;
+    bool ok = parseField(f, out);
+    f.close();
+    return ok;
 }
 
 bool FloorMap::hasMap() const {
@@ -119,6 +178,8 @@ bool FloorMap::remove() {
     if (!SPIFFS.exists(FLOORMAP_FILE))
         return false;
     SPIFFS.remove(FLOORMAP_FILE);
+    if (SPIFFS.exists(FLOORMAP_FIELD_FILE))
+        SPIFFS.remove(FLOORMAP_FIELD_FILE);
     dataLogger.logGuided("map_deleted");
     LOG("MAP", "Floor map deleted");
     return true;
@@ -126,15 +187,17 @@ bool FloorMap::remove() {
 
 // -- Upload ---------------------------------------------------------------------
 
-bool FloorMap::beginUpload(size_t totalBytes) {
+bool FloorMap::beginUpload(size_t totalBytes, bool field) {
     uploadError = "";
     if (uploading)
         abortUpload();
-    if (totalBytes == 0 || totalBytes > FLOORMAP_MAX_BYTES) {
+    size_t cap = field ? FLOORMAP_FIELD_MAX_BYTES : FLOORMAP_MAX_BYTES;
+    if (totalBytes == 0 || totalBytes > cap) {
         uploadError = "map too large";
         return false;
     }
-    uploadFile = SPIFFS.open(FLOORMAP_TMP_FILE, FILE_WRITE);
+    uploadingField = field;
+    uploadFile = SPIFFS.open(field ? FLOORMAP_FIELD_TMP_FILE : FLOORMAP_TMP_FILE, FILE_WRITE);
     if (!uploadFile) {
         uploadError = "cannot open temp file";
         return false;
@@ -147,7 +210,7 @@ bool FloorMap::beginUpload(size_t totalBytes) {
 bool FloorMap::writeChunk(const uint8_t *data, size_t len) {
     if (!uploading)
         return false;
-    if (uploadReceived + len > FLOORMAP_MAX_BYTES) {
+    if (uploadReceived + len > (uploadingField ? FLOORMAP_FIELD_MAX_BYTES : FLOORMAP_MAX_BYTES)) {
         uploadError = "map too large";
         abortUpload();
         return false;
@@ -166,6 +229,31 @@ bool FloorMap::endUpload() {
         return false;
     uploadFile.close();
     uploading = false;
+
+    if (uploadingField) {
+        LocField field;
+        File f = SPIFFS.open(FLOORMAP_FIELD_TMP_FILE, FILE_READ);
+        bool ok = f && parseField(f, field);
+        if (f)
+            f.close();
+        if (!ok) {
+            uploadError = "invalid localization field";
+            SPIFFS.remove(FLOORMAP_FIELD_TMP_FILE);
+            return false;
+        }
+        if (SPIFFS.exists(FLOORMAP_FIELD_FILE))
+            SPIFFS.remove(FLOORMAP_FIELD_FILE);
+        if (!SPIFFS.rename(FLOORMAP_FIELD_TMP_FILE, FLOORMAP_FIELD_FILE)) {
+            uploadError = "rename failed";
+            SPIFFS.remove(FLOORMAP_FIELD_TMP_FILE);
+            return false;
+        }
+        LOG("MAP", "Localization field saved (%dx%d @%dmm)", field.w, field.h, field.cell);
+        dataLogger.logGuided("field_saved", {{"w", String(field.w), FIELD_INT},
+                                             {"h", String(field.h), FIELD_INT},
+                                             {"cell", String(field.cell), FIELD_INT}});
+        return true;
+    }
 
     // Validate before replacing the current map
     FloorMapData parsed;
@@ -199,7 +287,7 @@ void FloorMap::abortUpload() {
     if (uploadFile)
         uploadFile.close();
     uploading = false;
-    SPIFFS.remove(FLOORMAP_TMP_FILE);
+    SPIFFS.remove(uploadingField ? FLOORMAP_FIELD_TMP_FILE : FLOORMAP_TMP_FILE);
 }
 
 // -- Parsing --------------------------------------------------------------------

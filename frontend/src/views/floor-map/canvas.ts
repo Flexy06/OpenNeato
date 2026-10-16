@@ -3,6 +3,7 @@
 // world<->screen mapping for hit testing and drawing zones.
 
 import type { FloorMap, FloorMapZone, MapBox, MapVertex } from "../../floor-map";
+import type { LocMap } from "../../loc-map";
 import { polygonCentroid, roomColor } from "../../floor-map";
 
 export interface MapView {
@@ -78,6 +79,7 @@ export interface RenderState {
     target: MapVertex | null;
     trail: MapVertex[];
     showPath: boolean;
+    loc: LocMap | null;
 }
 
 interface Palette {
@@ -172,6 +174,67 @@ function drawPath(ctx: CanvasRenderingContext2D, st: RenderState, s: Screen, pal
     ctx.strokeStyle = pal.path;
     ctx.lineWidth = 1;
     ctx.stroke();
+}
+
+// Walls from the LIDAR map, rasterized once per field into an offscreen image
+const wallImages = new WeakMap<LocMap, Map<string, HTMLCanvasElement>>();
+
+function wallImage(loc: LocMap, color: string): HTMLCanvasElement {
+    let byColor = wallImages.get(loc);
+    if (!byColor) {
+        byColor = new Map();
+        wallImages.set(loc, byColor);
+    }
+    const cached = byColor.get(color);
+    if (cached) return cached;
+    const img = document.createElement("canvas");
+    img.width = loc.w;
+    img.height = loc.h;
+    const ctx = img.getContext("2d");
+    if (ctx) {
+        const data = ctx.createImageData(loc.w, loc.h);
+        const m = color.match(/^#([0-9a-f]{6})$/i);
+        const n = m ? Number.parseInt(m[1], 16) : 0xffffff;
+        for (let cy = 0; cy < loc.h; cy++) {
+            for (let cx = 0; cx < loc.w; cx++) {
+                const v = loc.field[cy * loc.w + cx];
+                if (v < 200) continue;
+                const o = ((loc.h - 1 - cy) * loc.w + cx) * 4; // image rows run downwards = world y decreasing
+                data.data[o] = (n >> 16) & 255;
+                data.data[o + 1] = (n >> 8) & 255;
+                data.data[o + 2] = n & 255;
+                data.data[o + 3] = v >= 245 ? 235 : 90;
+            }
+        }
+        ctx.putImageData(data, 0, 0);
+    }
+    byColor.set(color, img);
+    return img;
+}
+
+function drawWalls(ctx: CanvasRenderingContext2D, st: RenderState, s: Screen, pal: Palette, dpr: number) {
+    const loc = st.loc;
+    if (!loc) return;
+    const img = wallImage(loc, pal.dark ? "#c9cee3" : "#3a3f55");
+    const r = (st.view.rot * Math.PI) / 180;
+    const k = loc.cell / 1000;
+    const S = st.view.scale;
+    const x0 = loc.originX / 1000 - st.view.cx;
+    const y1 = (loc.originY + loc.h * loc.cell) / 1000 - st.view.cy;
+    const cos = Math.cos(r);
+    const sin = Math.sin(r);
+    // Affine image→screen transform equivalent to toScreen()
+    const a = S * k * cos;
+    const b = S * k * sin;
+    const c = -S * k * sin;
+    const d = S * k * cos;
+    const e = s.w / 2 + S * (cos * x0 + sin * y1);
+    const f = s.h / 2 - S * (-sin * x0 + cos * y1);
+    ctx.save();
+    ctx.setTransform(dpr * a, dpr * b, dpr * c, dpr * d, dpr * e, dpr * f);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, 0, 0);
+    ctx.restore();
 }
 
 function hatch(ctx: CanvasRenderingContext2D, pts: MapVertex[], color: string) {
@@ -337,6 +400,7 @@ export function renderFloorMap(canvas: HTMLCanvasElement, st: RenderState, label
 
     drawGrid(ctx, st, s, pal);
     drawPath(ctx, st, s, pal);
+    drawWalls(ctx, st, s, pal, dpr);
     for (const r of st.map.rooms) drawZone(ctx, st, s, pal, r, "room");
     for (const n of st.map.nogos) drawZone(ctx, st, s, pal, n, "nogo");
 

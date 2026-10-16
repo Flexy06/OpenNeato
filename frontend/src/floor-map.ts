@@ -4,6 +4,7 @@
 // format and the in-memory model (metres, map frame of the pinned session,
 // dock = origin).
 
+import type { LocMap } from "./loc-map";
 import type { MapData } from "./types";
 
 export type MapVertex = [number, number];
@@ -187,8 +188,13 @@ export function pathShareInside(path: MapVertex[], poly: MapVertex[]): number {
     return n / path.length;
 }
 
-export function floorMapBounds(map: FloorMap): MapBox | null {
+export function floorMapBounds(map: FloorMap, loc?: LocMap | null): MapBox | null {
     const all: MapVertex[] = [[0, 0], ...map.path];
+    if (loc) {
+        // Wall extent (the field is padded by 0.4 m on each side)
+        all.push([(loc.originX + 400) / 1000, (loc.originY + 400) / 1000]);
+        all.push([(loc.originX + loc.w * loc.cell - 400) / 1000, (loc.originY + loc.h * loc.cell - 400) / 1000]);
+    }
     for (const z of [...map.rooms, ...map.nogos]) all.push(...z.poly);
     if (all.length === 0) return null;
     const pad = 0.4;

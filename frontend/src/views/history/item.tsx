@@ -2,10 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import boltSvg from "../../assets/icons/bolt.svg?raw";
 import rotateLeftSvg from "../../assets/icons/rotate-left.svg?raw";
 import rotateRightSvg from "../../assets/icons/rotate-right.svg?raw";
-import { api } from "../../api";
 import { Icon } from "../../components/icon";
 import { useNavigate } from "../../components/router";
-import { floorMapFromSession, parseFloorMap, serializeFloorMap } from "../../floor-map";
+import { pinSession } from "../../floor-map-pin";
 import { useMapGestures } from "../../hooks/use-map-gestures";
 import { T, useI18n } from "../../i18n";
 import { formatArea, formatDistance, type DistanceUnit } from "../../distance-units";
@@ -42,9 +41,7 @@ export function HistoryItemView({ file, map, mapEmpty, recording, distanceUnit, 
         if (!map) return;
         setPinning(true);
         try {
-            const existing = await api.getFloorMap();
-            const previous = existing ? parseFloorMap(existing) : null;
-            await api.saveFloorMap(serializeFloorMap(floorMapFromSession(file.name, map, previous)));
+            await pinSession(file.name, map);
             navigate("/map");
         } catch (e: unknown) {
             onError(normalizeError(e, "Failed to pin session"));

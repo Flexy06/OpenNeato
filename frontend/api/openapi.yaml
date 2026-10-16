@@ -956,6 +956,75 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /api/floormap/field:
+    get:
+      tags:
+        - Guided
+      summary: Download the localization field built from a mapping run
+      description: |
+        Binary, little endian: "OFL1", int32 originX mm, int32 originY mm, uint16 cell mm,
+        uint16 w, uint16 h, int8 lidarSign, int8 reserved, int16 lidarAngleOffset (0.1°),
+        int16 lidarOffsetX mm, int16 reserved, then w*h bytes (row-major, y up; 255 = wall).
+      responses:
+        "200":
+          description: Localization field
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: no localization field stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    put:
+      tags:
+        - Guided
+      summary: Replace the localization field (validated before it replaces the current one)
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "400":
+          description: invalid field
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: field larger than 96 KB
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/floormap/record:
+    post:
+      tags:
+        - Guided
+      summary: Start a mapping run (house clean that also records LIDAR scans)
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "409":
+          description: robot busy (guided or manual mode)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: robot not ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /api/guided/status:
     get:
       tags:
@@ -1467,6 +1536,19 @@ components:
           description: LIDAR wall-compass state used to correct heading drift
         compassFixes:
           type: integer
+        localization:
+          type: string
+          enum:
+            - map
+            - compass
+            - odometry
+          description: How the pose is corrected - LIDAR map matching, wall compass, or not at all
+        locFixes:
+          type: integer
+          description: Accepted map matches during this run
+        locScore:
+          type: number
+          description: Last map match score (0..1)
         targetX:
           type: number
           description: Current target waypoint (only while active)
@@ -1490,6 +1572,9 @@ components:
         - message
         - compass
         - compassFixes
+        - localization
+        - locFixes
+        - locScore
     ManualStatus:
       type: object
       properties:
@@ -1929,6 +2014,9 @@ components:
         battery:
           type: number
           description: Battery percentage at session start
+        scans:
+          type: boolean
+          description: Mapping run - the session also contains LIDAR scan lines ({"type":"scan",...})
       required:
         - type
         - mode
