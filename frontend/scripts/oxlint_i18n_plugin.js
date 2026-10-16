@@ -56,6 +56,11 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.join(scriptDir, "..");
 const localesDir = path.join(projectRoot, "src", "i18n", "locales");
 
+// Forward slashes on every OS so messages (and the tests asserting them) match on Windows too
+function relativePath(root, filePath) {
+    return path.relative(root, filePath).split(path.sep).join("/");
+}
+
 function jsxNameName(name) {
     if (!name) return "";
     if (name.type === "JSXIdentifier") return name.name;
@@ -157,7 +162,7 @@ function checkLocaleAlignment(directory = localesDir, root = projectRoot) {
 
             if (onlyLeft.length > 0 || onlyRight.length > 0) {
                 messages.push(
-                    `${path.relative(root, left.filePath)} and ${path.relative(
+                    `${relativePath(root, left.filePath)} and ${relativePath(
                         root,
                         right.filePath,
                     )} do not have the same locale keys: ` +
@@ -176,7 +181,7 @@ function checkLocaleAlignment(directory = localesDir, root = projectRoot) {
             if (!mismatch) continue;
 
             messages.push(
-                `${path.relative(root, left.filePath)} and ${path.relative(root, right.filePath)} key order is not aligned: ` +
+                `${relativePath(root, left.filePath)} and ${relativePath(root, right.filePath)} key order is not aligned: ` +
                     `entry ${mismatch.index + 1} is ${JSON.stringify(mismatch.actual)} in ${left.fileName}, ` +
                     `${JSON.stringify(mismatch.expected)} in ${right.fileName}.`,
             );
