@@ -316,6 +316,60 @@ body {
     max-width: 320px;
 }
 
+.conn-diag {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    max-width: 420px;
+}
+
+.conn-diag-hint {
+    margin: 0;
+    text-align: center;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-dim);
+}
+
+.conn-diag-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+}
+
+.conn-diag-details {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px 12px;
+    width: 100%;
+    margin: 0;
+    padding: 12px 14px;
+    font-size: 12px;
+    border-radius: 14px;
+    background: var(--card-bg);
+}
+
+.conn-diag-details dt {
+    color: var(--text-dim);
+}
+
+.conn-diag-details dd {
+    margin: 0;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+
+.conn-diag-details pre {
+    margin: 0;
+    white-space: pre-wrap;
+    font-size: 11px;
+    max-height: 160px;
+    overflow: auto;
+}
+
 /* Info cards */
 
 .info-cards {
@@ -2861,6 +2915,20 @@ input:disabled {
     font-size: 12px;
     color: var(--text-dim);
     white-space: nowrap;
+}
+
+.floormap-trace-stats {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 13px;
+    color: var(--text-primary);
+}
+
+.floormap-trace-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
 }
 
 .floormap-badge {

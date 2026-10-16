@@ -65,6 +65,7 @@
 // Retry with exponential backoff until the robot responds.
 #define SKEY_RETRY_INITIAL_MS 2000 // First retry after 2s
 #define SKEY_RETRY_MAX_MS 30000 // Cap backoff at 30s
+#define SKEY_ATTEMPT_TIMEOUT_MS 15000 // Watchdog: retry an attempt whose result never arrived
 
 // AsyncCache TTL values (milliseconds) — how long each response is considered fresh.
 // Callers within the TTL window get the cached value instantly; concurrent requests
@@ -272,6 +273,11 @@ enum CommandStatus {
 #define GUIDED_PLAN_CELL_MM 200 // Planning grid cell (doubled automatically for large homes)
 #define GUIDED_PLAN_MAX_CELLS 120 // Max cells per axis (dist map ≤ 29 KB while planning)
 #define GUIDED_MAX_REPLANS 4 // Re-plans of one transit leg after obstacles before giving up on it
+#define GUIDED_TRACE_FILE "/map/trace.jsonl" // Run trace of the last guided clean (always recorded)
+#define GUIDED_TRACE_MAX_BYTES 98304
+#define GUIDED_TRACE_FLUSH_BYTES 2048
+#define GUIDED_TRACE_EVERY_MM 150 // Pose line after this much travel ...
+#define GUIDED_TRACE_EVERY_DEG 20.0f // ... or this much turning
 #define GUIDED_RUN_GAP_MM 1200 // Recorded points further apart than this start a new cleaning run
 
 // Task Watchdog Timer (TWDT) — hardware watchdog that resets the ESP32 if

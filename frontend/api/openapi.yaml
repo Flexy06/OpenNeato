@@ -1025,6 +1025,44 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /api/diag:
+    get:
+      tags:
+        - System
+      summary: Robot identification and serial link diagnostics (always collected)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiagData"
+  /api/diag/identify:
+    post:
+      tags:
+        - System
+      summary: Retry robot identification immediately (resets the retry backoff)
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+  /api/guided/trace:
+    get:
+      tags:
+        - Guided
+      summary: Trace of the last guided clean (JSON lines - pose, localization fixes, events)
+      responses:
+        "200":
+          description: One JSON object per line
+          content:
+            application/x-ndjson:
+              schema:
+                type: string
+        "404":
+          description: no guided clean recorded yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /api/guided/status:
     get:
       tags:
@@ -1079,6 +1117,52 @@ paths:
                 $ref: "#/components/schemas/Error"
 components:
   schemas:
+    DiagData:
+      type: object
+      required: [identify, serial, esp]
+      properties:
+        identify:
+          type: object
+          required: [pending, hasSKey, model, attempts, lastAttemptAgoS, identifiedAgoS, nextRetryInS, inFlight, lastError, lastRaw]
+          properties:
+            pending: { type: boolean, description: Robot not identified yet }
+            hasSKey: { type: boolean }
+            model: { type: string }
+            attempts: { type: integer }
+            lastAttemptAgoS: { type: integer, description: Seconds since the last attempt (-1 = never) }
+            identifiedAgoS: { type: integer, description: Seconds since identification (-1 = never) }
+            nextRetryInS: { type: integer }
+            inFlight: { type: boolean, description: An attempt is waiting for its answer }
+            lastError: { type: string }
+            lastRaw: { type: string, description: Start of the last GetVersion answer }
+        serial:
+          type: object
+          required: [queueDepth, state, current, ok, timeouts, desyncs, unsupported, queueFull, rxBytes, lastRxAgoS, lastOkAgoS, lastFailCmd, lastFailStatus, lastFailAgoS, lastFailPartial]
+          properties:
+            queueDepth: { type: integer }
+            state: { type: string }
+            current: { type: string }
+            ok: { type: integer }
+            timeouts: { type: integer }
+            desyncs: { type: integer }
+            unsupported: { type: integer }
+            queueFull: { type: integer }
+            rxBytes: { type: integer, description: Bytes received from the robot since boot }
+            lastRxAgoS: { type: integer }
+            lastOkAgoS: { type: integer }
+            lastFailCmd: { type: string }
+            lastFailStatus: { type: string }
+            lastFailAgoS: { type: integer }
+            lastFailPartial: { type: string }
+        esp:
+          type: object
+          required: [uptimeS, resetReason, freeHeap, minFreeHeap, maxAllocHeap]
+          properties:
+            uptimeS: { type: integer }
+            resetReason: { type: integer, description: esp_reset_reason() code }
+            freeHeap: { type: integer }
+            minFreeHeap: { type: integer }
+            maxAllocHeap: { type: integer }
     Ok:
       type: object
       properties:

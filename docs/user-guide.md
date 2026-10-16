@@ -24,6 +24,7 @@ Everything you need to set up, configure, and troubleshoot OpenNeato.
     - [Cleaning Selected Rooms](#cleaning-selected-rooms)
     - [How It Works and Limitations](#how-it-works-and-limitations)
 - [Troubleshooting](#troubleshooting)
+    - [Stuck on "Connecting to robot..." and Diagnostics](#stuck-on-connecting-to-robot-and-diagnostics)
     - [Enabling Logging](#enabling-logging)
     - [Collecting Logs](#collecting-logs)
     - [Robot Stuck Starting a House Clean](#robot-stuck-starting-a-house-clean)
@@ -541,6 +542,23 @@ position estimate; **Return to dock** ends cleaning early, **Stop** halts the ro
 
 If something isn't working as expected, use the built-in diagnostics tools to collect
 information before creating an issue.
+
+### Stuck on "Connecting to robot..." and Diagnostics
+
+While the ESP32 has not identified the robot yet, the dashboard shows what it sees on the
+serial link: the attempt count, the last error and, under **Details**, the bytes received from
+the robot, command timeouts and the robot's last answer. **0 bytes received** means nothing
+arrives from the robot at all: wake it with a button press, check the debug-port cable and the
+UART pins (TX/RX swapped). **Retry now** restarts the identification immediately.
+
+**Download diagnostics** (also under the last room clean on the floor map) saves one JSON file
+with the serial diagnostics, system and robot state, the trace of the last room clean, the
+floor map and the newest log file. Settings are not included.
+
+Every room clean also records a trace (`GET /api/guided/trace`), independent of the log level.
+On the floor map, **Last room clean → Show on map** draws the driven path, each LIDAR position
+correction (green accepted, red rejected) and the obstacles, with a short verdict on the map
+lock.
 
 ### Enabling Logging
 

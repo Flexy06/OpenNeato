@@ -1,3 +1,5 @@
+#include <fstream>
+#include <cctype>
 // Host-side simulation of GuidedCleanManager against a simple physics model.
 // Build + run: ./run.sh   (see README.md in this folder)
 #include <cassert>
@@ -141,6 +143,8 @@ static std::string buildField(const NeatoSerial& s) {
 
 static bool g_useField = true;
 
+static int g_traceFailures = 0;
+
 static Result runScenario(const char *name, const char *rooms, std::function<void(NeatoSerial&)> tweak) {
     std::printf("\n=== %s (rooms=%s) ===\n", name, rooms);
     g_simMillis = 1;
@@ -222,6 +226,29 @@ static Result runScenario(const char *name, const char *rooms, std::function<voi
         }
     String st = guided.getStatusJson();
     std::printf("  final %s\n", st.c_str());
+    // Run trace: must exist and end with the result event
+    guided.flushTrace();
+    {
+        std::ifstream tf(fakeFsPath("/map/trace.jsonl"));
+        std::string line, last;
+        int lines = 0, locs = 0;
+        while (std::getline(tf, line)) {
+            lines++;
+            if (line.find("\"e\":\"loc\"") != std::string::npos) locs++;
+            last = line;
+        }
+        bool ok = lines >= 2 && (last.find("\"e\":\"done\"") != std::string::npos ||
+                                  last.find("\"e\":\"failed\"") != std::string::npos ||
+                                  last.find("\"e\":\"stopped\"") != std::string::npos);
+        std::printf("  trace lines=%d loc=%d %s\n", lines, locs, ok ? "ok" : "BAD");
+        if (!ok) g_traceFailures++;
+        if (const char *dir = std::getenv("GUIDED_SIM_TRACE_DIR")) {
+            std::string out = std::string(dir) + "/";
+            for (const char *p = name; *p; p++) out += std::isalnum(static_cast<unsigned char>(*p)) ? *p : '-';
+            std::ifstream in(fakeFsPath("/map/trace.jsonl"), std::ios::binary);
+            std::ofstream(out + ".jsonl", std::ios::binary) << in.rdbuf();
+        }
+    }
     std::printf("  true pose %.0f,%.0f θ=%.1f° docked=%d collisions(ticks)=%d dockCmds=%zu scans=%d\n", serial.tx,
                 serial.ty, serial.tth * 180 / M_PI, serial.docked(), serial.collisions, serial.cleanCmds.size(),
                 serial.scans);
@@ -334,6 +361,8 @@ int main(int argc, char **argv) {
     });
     expect(k.phase == "done" && k.docked, "completes and docks with offset LIDAR");
     expect(k.minNogoDist > 0, "avoids no-go with offset LIDAR");
+
+    expect(g_traceFailures == 0, "every started run leaves a complete trace");
 
     std::printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "ALL PASSED", failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;

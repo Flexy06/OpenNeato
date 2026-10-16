@@ -44,6 +44,13 @@ public:
     // True while initSKey is still retrying (robot not yet identified)
     bool isIdentifying() const { return sKeyPending; }
 
+    // -- Diagnostics ------------------------------------------------------------
+    // Identification attempts, last failure + raw answer, serial statistics.
+    // Always collected (independent of the log level), served by GET /api/diag.
+    String getDiagJson() const;
+    // Restart robot identification immediately (resets the retry backoff)
+    void reidentify();
+
     // -- Sensor queries (typed callbacks) ------------------------------------
     // These are transparently cached: concurrent requests are coalesced,
     // and results within the TTL window are served from cache.
@@ -155,6 +162,28 @@ private:
     bool sKeyPending = true;
     unsigned long sKeyRetryAt = 0;
     unsigned long sKeyRetryDelay = SKEY_RETRY_INITIAL_MS;
+    // Identification diagnostics + watchdog (a lost callback must not block forever)
+    uint32_t identGen = 0;
+    unsigned long identAttemptAt = 0;
+    unsigned long identDoneAt = 0;
+    int identAttempts = 0;
+    String identLastError;
+    String identLastRaw;
+
+    // Serial statistics (diagnostics)
+    CommandStatus lastStatus = CMD_SUCCESS;
+    uint32_t statOk = 0;
+    uint32_t statTimeout = 0;
+    uint32_t statDesync = 0;
+    uint32_t statUnsupported = 0;
+    uint32_t statQueueFull = 0;
+    uint32_t rxBytes = 0;
+    unsigned long lastRxAt = 0;
+    unsigned long lastOkAt = 0;
+    String lastFailCmd;
+    String lastFailStatus;
+    String lastFailPartial;
+    unsigned long lastFailAt = 0;
 
     // Build a SetEvent command string: "SetEvent event <evt> SKey <sKey>"
     String buildSetEvent(const char *event) const;

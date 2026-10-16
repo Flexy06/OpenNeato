@@ -3,6 +3,7 @@
 // world<->screen mapping for hit testing and drawing zones.
 
 import type { FloorMap, FloorMapZone, MapBox, MapVertex } from "../../floor-map";
+import type { GuidedTrace } from "../../guided-trace";
 import type { LocMap } from "../../loc-map";
 import { polygonCentroid, roomColor } from "../../floor-map";
 
@@ -80,6 +81,7 @@ export interface RenderState {
     trail: MapVertex[];
     showPath: boolean;
     loc: LocMap | null;
+    trace: GuidedTrace | null; // Last guided run (analysis overlay)
 }
 
 interface Palette {
@@ -384,6 +386,57 @@ function drawRobot(ctx: CanvasRenderingContext2D, st: RenderState, s: Screen, pa
     ctx.restore();
 }
 
+// Last guided run: driven path (odometry estimate, solid while cleaning), each
+// localization fix as a tick from the odometry pose to the matched pose (green =
+// accepted, red = rejected) and obstacles as crosses.
+function drawTrace(ctx: CanvasRenderingContext2D, st: RenderState, s: Screen, pal: Palette) {
+    const tr = st.trace;
+    if (!tr) return;
+    const amber = "#e5972a";
+    for (let i = 1; i < tr.poses.length; i++) {
+        const a = tr.poses[i - 1];
+        const b = tr.poses[i];
+        if (Math.hypot(b.x - a.x, b.y - a.y) > 0.8) continue; // Fix jump — do not draw a long line
+        const [ax, ay] = toScreen(st.view, s, a.x, a.y);
+        const [bx, by] = toScreen(st.view, s, b.x, b.y);
+        ctx.beginPath();
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(bx, by);
+        ctx.strokeStyle = b.cleaning ? withAlpha(amber, 0.85) : withAlpha(amber, 0.4);
+        ctx.lineWidth = b.cleaning ? 2.5 : 1.5;
+        ctx.setLineDash(b.cleaning ? [] : [4, 3]);
+        ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    for (const f of tr.fixes) {
+        const [ox, oy] = toScreen(st.view, s, f.x, f.y);
+        const [mx, my] = toScreen(st.view, s, f.mx, f.my);
+        const color = f.ok ? pal.green : pal.red;
+        ctx.beginPath();
+        ctx.moveTo(ox, oy);
+        ctx.lineTo(mx, my);
+        ctx.strokeStyle = withAlpha(color, 0.9);
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(mx, my, 2.5, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
+    }
+    for (const ev of tr.events) {
+        if (ev.e !== "obstacle") continue;
+        const [px, py] = toScreen(st.view, s, ev.x, ev.y);
+        ctx.beginPath();
+        ctx.moveTo(px - 5, py - 5);
+        ctx.lineTo(px + 5, py + 5);
+        ctx.moveTo(px + 5, py - 5);
+        ctx.lineTo(px - 5, py + 5);
+        ctx.strokeStyle = pal.red;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    }
+}
+
 export function renderFloorMap(canvas: HTMLCanvasElement, st: RenderState, labels: (zone: FloorMapZone) => string) {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
@@ -424,6 +477,7 @@ export function renderFloorMap(canvas: HTMLCanvasElement, st: RenderState, label
         ctx.setLineDash([]);
     }
 
+    drawTrace(ctx, st, s, pal);
     drawDock(ctx, st, s, pal);
     drawRobot(ctx, st, s, pal);
 

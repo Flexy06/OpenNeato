@@ -4,6 +4,7 @@
 #include <cstdio>
 #define FILE_READ "r"
 #define FILE_WRITE "w"
+#define FILE_APPEND "a"
 // Files live under a temp directory on the host
 std::string fakeFsPath(const char *p);
 class File {
@@ -17,6 +18,7 @@ public:
     explicit operator bool() const { return f_ != nullptr; }
     void close() { if (f_) fclose(f_); f_ = nullptr; }
     size_t write(const uint8_t *d, size_t n) { return fwrite(d, 1, n, f_); }
+    size_t print(const String& t) { return fwrite(t.c_str(), 1, t.length(), f_); }
     int read(uint8_t *d, size_t n) { return static_cast<int>(fread(d, 1, n, f_)); }
     size_t size() { long p = ftell(f_); fseek(f_, 0, SEEK_END); long s = ftell(f_); fseek(f_, p, SEEK_SET); return s; }
     int available() { int c = fgetc(f_); if (c == EOF) return 0; ungetc(c, f_); return 1; }

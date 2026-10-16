@@ -552,6 +552,12 @@ void GuidedCleanManager::setLeg(std::vector<Waypoint>& pts, bool transit) {
     }
     legTransit = transit;
     legReplans = 0;
+    if (!route.empty())
+        tracePose("leg", {{"k", transit ? "transit" : "clean", FIELD_STRING},
+                          {"run", String(curRun), FIELD_INT},
+                          {"n", String(static_cast<unsigned>(route.size() - 1)), FIELD_INT},
+                          {"gx", String(route.back().x), FIELD_INT},
+                          {"gy", String(route.back().y), FIELD_INT}});
     routeIdx = 0;
     targetIdx = 0;
     obstacleStreak = 0;
@@ -637,7 +643,7 @@ void GuidedCleanManager::skipCurrentRun(const char *why) {
         r.done = true;
     }
     LOG("GUIDED", "Skipping run %d (%s)", curRun, why);
-    dataLogger.logGuided("skip_run", {{"run", String(curRun), FIELD_INT}, {"reason", why, FIELD_STRING}});
+    event("skip_run", {{"run", String(curRun), FIELD_INT}, {"reason", why, FIELD_STRING}});
     curRun = -1;
     setCleaningMotors(false);
     startNextLeg();
@@ -794,9 +800,12 @@ String GuidedCleanManager::command(const String& action, const String& rooms) {
         poseX = 0.0f;
         poseY = 0.0f;
         poseTheta = 0.0f;
-        dataLogger.logGuided("start", {{"rooms", rooms.isEmpty() ? String("all") : rooms, FIELD_STRING},
-                                       {"runs", String(static_cast<unsigned>(runs.size())), FIELD_INT},
-                                       {"clean", String(cleanTotal), FIELD_INT}});
+        traceBegin();
+        event("start", {{"rooms", rooms.isEmpty() ? String("all") : rooms, FIELD_STRING},
+                        {"field", field.valid() ? "true" : "false", FIELD_BOOL},
+                        {"nogos", String(static_cast<unsigned>(nogos.size())), FIELD_INT},
+                        {"runs", String(static_cast<unsigned>(runs.size())), FIELD_INT},
+                        {"clean", String(cleanTotal), FIELD_INT}});
         beginStart();
         return "";
     }
@@ -998,6 +1007,13 @@ void GuidedCleanManager::integrateEncoders(int newL, int newR) {
     poseTheta = wrapAngle(poseTheta + dTheta);
     distSinceFix += fabsf(ds);
     turnSinceFix += fabsf(dTheta);
+    traceDist += fabsf(ds);
+    traceTurn += fabsf(dTheta);
+    if (traceDist >= GUIDED_TRACE_EVERY_MM || traceTurn >= GUIDED_TRACE_EVERY_DEG * DEG) {
+        traceDist = 0.0f;
+        traceTurn = 0.0f;
+        tracePose("p", {{"c", motorsOn ? "true" : "false", FIELD_BOOL}});
+    }
 }
 
 void GuidedCleanManager::onMotors(const MotorData& m) {
@@ -1147,9 +1163,9 @@ void GuidedCleanManager::endSegment(bool obstacle) {
 void GuidedCleanManager::onObstacle(const char *reason) {
     obstacleTotal++;
     LOG("GUIDED", "Obstacle (%s) at %.0f,%.0f → back off", reason, poseX, poseY);
-    dataLogger.logGuided("obstacle", {{"reason", reason, FIELD_STRING},
-                                      {"x", String(static_cast<int>(poseX)), FIELD_INT},
-                                      {"y", String(static_cast<int>(poseY)), FIELD_INT}});
+    event("obstacle", {{"reason", reason, FIELD_STRING},
+                       {"x", String(static_cast<int>(poseX)), FIELD_INT},
+                       {"y", String(static_cast<int>(poseY)), FIELD_INT}});
     bool isCliff = strcmp(reason, "cliff") == 0;
     rememberObstacle(GUIDED_ROBOT_RADIUS_MM + (isCliff ? 60 : GUIDED_OBSTACLE_RADIUS_MM),
                      isCliff ? GUIDED_CLIFF_RADIUS_MM : GUIDED_OBSTACLE_RADIUS_MM);
@@ -1370,9 +1386,9 @@ void GuidedCleanManager::setCleaningMotors(bool on) {
 
 void GuidedCleanManager::beginReturn(const String& reason) {
     LOG("GUIDED", "Returning to dock (%s)", reason.c_str());
-    dataLogger.logGuided("return", {{"reason", reason, FIELD_STRING},
-                                    {"cleaned", String(cleanDone), FIELD_INT},
-                                    {"total", String(cleanTotal), FIELD_INT}});
+    event("return", {{"reason", reason, FIELD_STRING},
+                     {"cleaned", String(cleanDone), FIELD_INT},
+                     {"total", String(cleanTotal), FIELD_INT}});
     lastError = reason == "done" ? String("") : reason;
     setCleaningMotors(false);
 
@@ -1415,6 +1431,10 @@ void GuidedCleanManager::beginDocking() {
 //   5  straight back-in onto the contacts → 1 (moving) → 2 (verify)
 //   10 give up: hand over to the robot's own SEND_TO_BASE
 void GuidedCleanManager::stepDocking() {
+    if (dockStage != tracedDockStage) {
+        tracedDockStage = dockStage;
+        tracePose("dock", {{"stage", String(dockStage), FIELD_INT}, {"try", String(dockAttempts), FIELD_INT}});
+    }
     const float staging = GUIDED_DOCK_STAGING_MM;
     const float preback = GUIDED_DOCK_PREBACK_MM;
     bool canMatch = field.valid() || (refScanValid && compassSign != 0);
@@ -1554,10 +1574,12 @@ void GuidedCleanManager::finish(Phase result, const String& reason) {
     finishedMs = millis();
 
     LOG("GUIDED", "Finish: %s → %s (%s)", phaseName(from), phaseName(result), reason.c_str());
-    dataLogger.logGuided(phaseName(result), {{"reason", reason, FIELD_STRING},
-                                             {"cleaned", String(cleanDone), FIELD_INT},
-                                             {"total", String(cleanTotal), FIELD_INT},
-                                             {"obstacles", String(obstacleTotal), FIELD_INT}});
+    event(phaseName(result), {{"reason", reason, FIELD_STRING},
+                              {"cleaned", String(cleanDone), FIELD_INT},
+                              {"total", String(cleanTotal), FIELD_INT},
+                              {"obstacles", String(obstacleTotal), FIELD_INT}});
+
+    traceFlush();
 
     bool requestDock = fallbackDock && result == Phase::Done;
     if (!inTestMode) {
@@ -1713,7 +1735,7 @@ void GuidedCleanManager::applyCompass(const LdsScanData& scan, bool reference) {
             return; // Inconsistent — leave uncalibrated
         }
         LOG("GUIDED", "Compass calibrated: LDS angles %s", compassSign > 0 ? "CCW" : "CW");
-        dataLogger.logGuided("compass", {{"direction", compassSign > 0 ? "ccw" : "cw", FIELD_STRING}});
+        event("compass", {{"direction", compassSign > 0 ? "ccw" : "cw", FIELD_STRING}});
     }
 
     float predicted = compassSign > 0 ? compassPhi0 - phi : phi - compassPhi0;
@@ -1864,8 +1886,20 @@ bool GuidedCleanManager::matchField(const LdsScanData& scan, int radiusMM, int a
     locScore = norm;
     if (norm < GUIDED_LOC_MIN_SCORE || norm + 0.02f < before) {
         LOG("GUIDED", "Loc: rejected (score %.2f, at odometry pose %.2f)", norm, before);
+        tracePose("loc", {{"mx", String(static_cast<int>(bestX)), FIELD_INT},
+                          {"my", String(static_cast<int>(bestY)), FIELD_INT},
+                          {"mt", String(static_cast<int>(bestT / DEG)), FIELD_INT},
+                          {"s", String(norm, 2), FIELD_FLOAT},
+                          {"s0", String(before, 2), FIELD_FLOAT},
+                          {"ok", "false", FIELD_BOOL}});
         return false;
     }
+    tracePose("loc", {{"mx", String(static_cast<int>(bestX)), FIELD_INT},
+                      {"my", String(static_cast<int>(bestY)), FIELD_INT},
+                      {"mt", String(static_cast<int>(bestT / DEG)), FIELD_INT},
+                      {"s", String(norm, 2), FIELD_FLOAT},
+                      {"s0", String(before, 2), FIELD_FLOAT},
+                      {"ok", "true", FIELD_BOOL}});
     float dx = bestX - poseX;
     float dy = bestY - poseY;
     float dt = wrapAngle(bestT - poseTheta);
@@ -1903,10 +1937,10 @@ void GuidedCleanManager::requestIcpScan(uint8_t resumeStage) {
             poseY += cy;
             poseTheta = wrapAngle(poseTheta + ct);
             LOG("GUIDED", "Dock ICP: corrected by %.0f,%.0f mm %.1f° → pose %.0f,%.0f", cx, cy, ct / DEG, poseX, poseY);
-            dataLogger.logGuided("dock_match", {{"dx", String(static_cast<int>(cx)), FIELD_INT},
-                                                {"dy", String(static_cast<int>(cy)), FIELD_INT},
-                                                {"x", String(static_cast<int>(poseX)), FIELD_INT},
-                                                {"y", String(static_cast<int>(poseY)), FIELD_INT}});
+            event("dock_match", {{"dx", String(static_cast<int>(cx)), FIELD_INT},
+                                 {"dy", String(static_cast<int>(cy)), FIELD_INT},
+                                 {"x", String(static_cast<int>(poseX)), FIELD_INT},
+                                 {"y", String(static_cast<int>(poseY)), FIELD_INT}});
             return;
         }
         LOG("GUIDED", "Dock ICP: no reliable match — continuing on odometry");
@@ -2098,4 +2132,57 @@ String GuidedCleanManager::getStatusJson() const {
         fields.push_back({"targetY", String(static_cast<float>(route[targetIdx].y) / 1000.0f, 3), FIELD_FLOAT});
     }
     return fieldsToJson(fields);
+}
+
+// -- Run trace (always on, /map/trace.jsonl, served by GET /api/guided/trace) -------------------
+// One JSON object per line: {"e":<event>,"ms":<since start>,"x","y","t"(deg), ...}. Pose lines
+// ("p") every GUIDED_TRACE_EVERY_MM, localization fixes ("loc": matched pose mx/my/mt, score
+// s vs score s0 at the odometry pose), legs, obstacles, dock stages and the result. Buffered
+// in RAM and appended in chunks to keep flash writes rare.
+
+void GuidedCleanManager::traceBegin() {
+    traceBuf = "";
+    traceBytes = 0;
+    traceDist = 0.0f;
+    traceTurn = 0.0f;
+    tracedDockStage = 255;
+    traceStartMs = millis();
+    SPIFFS.remove(GUIDED_TRACE_FILE);
+}
+
+void GuidedCleanManager::event(const String& name, const std::vector<Field>& fields) {
+    dataLogger.logGuided(name, fields);
+    tracePose(name, fields);
+}
+
+void GuidedCleanManager::tracePose(const String& name, const std::vector<Field>& fields) {
+    bool important = name != "p" && name != "loc";
+    if (traceBytes + traceBuf.length() > GUIDED_TRACE_MAX_BYTES - (important ? 0 : 4096))
+        return; // Full: keep room for the remaining events
+    std::vector<Field> all = {{"e", name, FIELD_STRING},
+                              {"ms", String(millis() - traceStartMs), FIELD_INT},
+                              {"x", String(static_cast<int>(poseX)), FIELD_INT},
+                              {"y", String(static_cast<int>(poseY)), FIELD_INT},
+                              {"t", String(static_cast<int>(poseTheta / DEG)), FIELD_INT}};
+    all.insert(all.end(), fields.begin(), fields.end());
+    traceBuf += fieldsToJson(all);
+    traceBuf += '\n';
+    if (traceBuf.length() >= GUIDED_TRACE_FLUSH_BYTES)
+        traceFlush();
+}
+
+void GuidedCleanManager::traceFlush() {
+    if (traceBuf.isEmpty())
+        return;
+    File f = SPIFFS.open(GUIDED_TRACE_FILE, FILE_APPEND);
+    if (f) {
+        f.print(traceBuf);
+        f.close();
+    }
+    traceBytes += traceBuf.length();
+    traceBuf = "";
+}
+
+bool GuidedCleanManager::hasTrace() const {
+    return SPIFFS.exists(GUIDED_TRACE_FILE);
 }

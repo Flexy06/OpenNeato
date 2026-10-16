@@ -13,6 +13,7 @@
 #include "floor_map.h"
 #include "guided_clean_manager.h"
 #include <SPIFFS.h>
+#include <esp_system.h>
 
 unsigned long WebServer::lastApiActivity = 0;
 
@@ -254,6 +255,28 @@ void WebServer::registerSystemRoutes() {
     // GET /api/system — live system health (heap, uptime, RSSI, storage, NTP)
     loggedRoute("/api/system", HTTP_GET, [this](AsyncWebServerRequest *request) -> int {
         request->send(200, "application/json", sysMgr.getSystemHealth(settingsMgr.get().tz).toJson());
+        return 200;
+    });
+
+    // GET /api/diag — robot identification + serial link diagnostics (always collected)
+    loggedRoute("/api/diag", HTTP_GET, [this](AsyncWebServerRequest *request) -> int {
+        String body = neato.getDiagJson();
+        body.remove(body.length() - 1); // Reopen the object to append ESP fields
+        body += ",\"esp\":" +
+                fieldsToJson({{"uptimeS", String(millis() / 1000), FIELD_INT},
+                              {"resetReason", String(static_cast<int>(esp_reset_reason())), FIELD_INT},
+                              {"freeHeap", String(ESP.getFreeHeap()), FIELD_INT},
+                              {"minFreeHeap", String(ESP.getMinFreeHeap()), FIELD_INT},
+                              {"maxAllocHeap", String(ESP.getMaxAllocHeap()), FIELD_INT}}) +
+                "}";
+        request->send(200, "application/json", body);
+        return 200;
+    });
+
+    // POST /api/diag/identify — retry robot identification now
+    loggedRoute("/api/diag/identify", HTTP_POST, [this](AsyncWebServerRequest *request) -> int {
+        neato.reidentify();
+        sendOk(request);
         return 200;
     });
 
@@ -596,6 +619,17 @@ void WebServer::registerGuidedRoutes() {
 
     // GET /api/guided/status — guided clean progress and live pose
     registerGetRoute("/api/guided/status", guidedMgr, &GuidedCleanManager::getStatusJson);
+
+    // GET /api/guided/trace — JSON-lines trace of the last guided clean (pose, fixes, events)
+    loggedRoute("/api/guided/trace", HTTP_GET, [this](AsyncWebServerRequest *request) -> int {
+        guidedMgr.flushTrace();
+        if (!guidedMgr.hasTrace()) {
+            sendError(request, 404, "no trace");
+            return 404;
+        }
+        request->send(SPIFFS, GUIDED_TRACE_FILE, "application/x-ndjson");
+        return 200;
+    });
 
     // POST /api/guided?action=start|home|stop[&rooms=1,3]
     loggedRoute("/api/guided", HTTP_POST, [this](AsyncWebServerRequest *request) -> int {

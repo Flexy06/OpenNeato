@@ -1,5 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { api } from "../../api";
+import { downloadDiagnostics } from "../../diagnostics";
+import type { GuidedTrace } from "../../guided-trace";
 import { T, useI18n } from "../../i18n";
 import type { FloorMap, FloorMapZone } from "../../floor-map";
 import { MAX_ZONES, roomColor } from "../../floor-map";
@@ -396,6 +398,89 @@ export function EditPanel(props: EditPanelProps) {
                     <T>Delete floor map</T>
                 </button>
             </div>
+        </div>
+    );
+}
+
+interface TraceCardProps {
+    trace: GuidedTrace;
+    shown: boolean;
+    onToggle: () => void;
+}
+
+// Analysis of the last guided run: result, localization quality, obstacles.
+export function TraceCard({ trace, shown, onToggle }: TraceCardProps) {
+    const { t } = useI18n();
+    const [busy, setBusy] = useState(false);
+    const sm = trace.summary;
+    const fixes = sm.fixesOk + sm.fixesRejected;
+    const rejectedShare = fixes ? sm.fixesRejected / fixes : 0;
+    let verdict: string;
+    if (!sm.withField) verdict = t("No LIDAR map: position came from odometry and the wall compass only.");
+    else if (fixes === 0) verdict = t("No localization fix was made: check that the LIDAR spins during the run.");
+    else if (rejectedShare > 0.3 || (sm.avgScore ?? 0) < 0.5)
+        verdict = t("Weak map lock: many scans did not match the map. Record a new mapping run.");
+    else verdict = t("Map lock was good during the run.");
+    const result =
+        sm.result === "done"
+            ? t("Completed")
+            : sm.result === "failed"
+              ? t("Failed")
+              : sm.result === "stopped"
+                ? t("Stopped")
+                : t("Not finished");
+
+    const download = async () => {
+        setBusy(true);
+        try {
+            await downloadDiagnostics();
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <div class="floormap-panel floormap-trace">
+            <div class="floormap-panel-title">
+                <T>Last room clean</T>
+            </div>
+            <div class="floormap-trace-stats">
+                <span>
+                    {result}
+                    {sm.reason && ` (${sm.reason})`}
+                </span>
+                <span>
+                    {t("{min} min · {m} m", { min: Math.round(sm.durationS / 60), m: sm.distanceM.toFixed(1) })}
+                </span>
+                {sm.total > 0 && (
+                    <span>{t("{done} of {total} points cleaned", { done: sm.cleaned, total: sm.total })}</span>
+                )}
+                <span>
+                    {t("Fixes {ok} ok / {bad} rejected", { ok: sm.fixesOk, bad: sm.fixesRejected })}
+                    {sm.avgScore !== null && ` · ${t("lock {score}%", { score: Math.round(sm.avgScore * 100) })}`}
+                </span>
+                <span>
+                    {t("Largest correction {mm} mm", { mm: Math.round(sm.maxShiftMm) })} ·{" "}
+                    {t("{n} obstacles", { n: sm.obstacles })}
+                </span>
+            </div>
+            <div class="floormap-note small">{verdict}</div>
+            <div class="floormap-trace-actions">
+                <button type="button" class={`floormap-btn${shown ? " primary" : ""}`} onClick={onToggle}>
+                    {shown ? t("Hide on map") : t("Show on map")}
+                </button>
+                <button type="button" class="floormap-btn" onClick={download} disabled={busy}>
+                    {busy ? t("Collecting...") : t("Download diagnostics")}
+                </button>
+            </div>
+            {shown && (
+                <div class="floormap-note small">
+                    <T>
+                        Orange: driven path (solid while cleaning). Green/red ticks: position corrections from the LIDAR
+                        map (accepted/rejected). Red crosses: obstacles.
+                    </T>
+                </div>
+            )}
         </div>
     );
 }

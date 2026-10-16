@@ -58,6 +58,10 @@ public:
 
     String getStatusJson() const;
 
+    // Trace of the last run (see traceBegin); flushes pending lines first
+    bool hasTrace() const;
+    void flushTrace() { traceFlush(); }
+
 private:
     enum class Phase : uint8_t {
         Idle, // Never run since boot
@@ -287,6 +291,19 @@ private:
     void checkDocked();
     void finish(Phase result, const String& reason);
     void fail(const String& reason) { finish(Phase::Failed, reason); }
+
+    // -- Run trace ---------------------------------------------------------------------
+    String traceBuf;
+    size_t traceBytes = 0;
+    float traceDist = 0.0f;
+    float traceTurn = 0.0f;
+    uint8_t tracedDockStage = 255;
+    unsigned long traceStartMs = 0;
+    void traceBegin();
+    void traceFlush();
+    void tracePose(const String& name, const std::vector<Field>& fields);
+    // Log to the data logger (if enabled) and to the run trace (always)
+    void event(const String& name, const std::vector<Field>& fields);
 
     static const char *phaseName(Phase p);
     static float wrapAngle(float a);

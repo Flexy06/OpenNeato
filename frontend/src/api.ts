@@ -3,6 +3,7 @@ import type {
     BatteryAnalogData,
     BatteryWarrantyData,
     ChargerData,
+    DiagData,
     ErrorData,
     FirmwareVersion,
     GuidedStatus,
@@ -100,6 +101,14 @@ async function putFloorMap(doc: string): Promise<void> {
         body: doc,
     });
     if (!res.ok) throw new Error(await parseError(res));
+}
+
+// Trace of the last guided clean (JSON lines). 404 = none recorded yet.
+async function fetchGuidedTrace(): Promise<string | null> {
+    const res = await fetch("/api/guided/trace");
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(await parseError(res));
+    return res.text();
 }
 
 async function fetchLocField(): Promise<ArrayBuffer | null> {
@@ -214,6 +223,9 @@ export const api = {
     saveLocField: (data: Uint8Array) => putLocField(data),
     startMappingRun: () => post("/api/floormap/record"),
     getGuidedStatus: () => get<GuidedStatus>("/api/guided/status"),
+    getGuidedTrace: () => fetchGuidedTrace(),
+    getDiag: () => get<DiagData>("/api/diag"),
+    reidentify: () => post("/api/diag/identify"),
     guidedStart: (rooms: number[]) => guided("start", rooms),
     guidedHome: () => guided("home"),
     guidedStop: () => guided("stop"),

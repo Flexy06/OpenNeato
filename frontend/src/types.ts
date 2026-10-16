@@ -5,6 +5,7 @@ export type {
     BatteryAnalogData,
     BatteryWarrantyData,
     ChargerData,
+    DiagData,
     ErrorData,
     FirmwareVersion,
     GuidedStatus,

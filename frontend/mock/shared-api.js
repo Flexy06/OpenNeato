@@ -877,6 +877,20 @@ function createMockApi(context) {
             return okResponse();
         }
 
+        if (method === "GET" && path === "/api/diag") {
+            return jsonResponse(mockDiag(state));
+        }
+
+        if (method === "POST" && path === "/api/diag/identify") {
+            return okResponse();
+        }
+
+        if (method === "GET" && path === "/api/guided/trace") {
+            const trace = mockGuidedTrace(state.floorMap);
+            if (!trace) return errorResponse("no trace", 404);
+            return { status: 200, headers: { "Content-Type": "application/x-ndjson" }, body: trace };
+        }
+
         if (method === "GET" && path === "/api/guided/status") {
             return jsonResponse(guidedStatus(state, !!state.floorMap, Date.now()));
         }
@@ -945,3 +959,115 @@ function createMockApi(context) {
 }
 
 export { createMockApi };
+
+// -- Diagnostics mock -----------------------------------------------------------
+const mockBootTime = Date.now();
+
+function mockDiag(state) {
+    const up = Math.round((Date.now() - mockBootTime) / 1000);
+    const identifying = !!state.identifying;
+    return {
+        identify: {
+            pending: identifying,
+            hasSKey: !identifying,
+            model: identifying ? "" : "Botvac D7",
+            attempts: identifying ? Math.max(1, Math.floor(up / 8)) : 1,
+            lastAttemptAgoS: identifying ? up % 8 : up,
+            identifiedAgoS: identifying ? -1 : up,
+            nextRetryInS: identifying ? 8 - (up % 8) : 0,
+            inFlight: false,
+            lastError: identifying ? "timeout (no answer from robot)" : "",
+            lastRaw: "",
+        },
+        serial: {
+            queueDepth: 0,
+            state: "idle",
+            current: "",
+            ok: identifying ? 0 : up * 2,
+            timeouts: identifying ? Math.max(1, Math.floor(up / 8)) : 0,
+            desyncs: 0,
+            unsupported: 0,
+            queueFull: 0,
+            rxBytes: identifying ? 0 : up * 900,
+            lastRxAgoS: identifying ? -1 : 0,
+            lastOkAgoS: identifying ? -1 : 0,
+            lastFailCmd: identifying ? "GetVersion" : "",
+            lastFailStatus: identifying ? "timeout" : "",
+            lastFailAgoS: identifying ? up % 8 : -1,
+            lastFailPartial: "",
+        },
+        esp: { uptimeS: up, resetReason: 1, freeHeap: 142000, minFreeHeap: 98000, maxAllocHeap: 65000 },
+    };
+}
+
+// Synthetic trace of a guided run along the pinned path: odometry drifts
+// slowly, every ~0.4 m a LIDAR fix pulls it back (a few are rejected).
+function mockGuidedTrace(floorMap) {
+    if (!floorMap) return null;
+    const pts = [];
+    for (const line of String(floorMap).split("\n")) {
+        if (!line.startsWith("P ")) continue;
+        for (const tok of line.slice(2).split(" ")) {
+            const [x, y] = tok.split(",").map(Number);
+            if (Number.isFinite(x) && Number.isFinite(y)) pts.push([x, y]);
+        }
+    }
+    if (pts.length < 20) return null;
+    const run = pts.slice(0, Math.min(pts.length, 260));
+    const out = [];
+    const push = (o) => out.push(JSON.stringify(o));
+    push({ e: "start", ms: 0, x: 0, y: 0, t: 0, rooms: "1", field: true, nogos: 1, runs: 3, clean: run.length });
+    let ms = 0;
+    let driftX = 0;
+    let driftY = 0;
+    let since = 0;
+    let fix = 0;
+    for (let i = 1; i < run.length; i++) {
+        const [x, y] = run[i];
+        const [px, py] = run[i - 1];
+        const d = Math.hypot(x - px, y - py);
+        ms += Math.round((d / 150) * 1000) + 300;
+        driftX += d * 0.03;
+        driftY -= d * 0.015;
+        since += d;
+        const t = Math.round((Math.atan2(y - py, x - px) * 180) / Math.PI);
+        const ox = Math.round(x + driftX);
+        const oy = Math.round(y + driftY);
+        push({ e: "p", ms, x: ox, y: oy, t, c: i > 5 });
+        if (since >= 400) {
+            since = 0;
+            fix++;
+            const ok = fix % 9 !== 0;
+            push({
+                e: "loc",
+                ms: ms + 50,
+                x: ox,
+                y: oy,
+                t,
+                mx: Math.round(x),
+                my: Math.round(y),
+                mt: t,
+                s: ok ? 0.82 : 0.24,
+                s0: 0.61,
+                ok,
+            });
+            if (ok) {
+                driftX = 0;
+                driftY = 0;
+            }
+        }
+        if (i === 120) push({ e: "obstacle", ms, x: ox, y: oy, t, reason: "bumper" });
+    }
+    push({
+        e: "done",
+        ms: ms + 30000,
+        x: 0,
+        y: 0,
+        t: 0,
+        reason: "",
+        cleaned: run.length - 6,
+        total: run.length,
+        obstacles: 1,
+    });
+    return `${out.join("\n")}\n`;
+}

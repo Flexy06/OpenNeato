@@ -22,6 +22,7 @@ import wifiSvg from "../assets/icons/wifi.svg?raw";
 import wifiOffSvg from "../assets/icons/wifi-off.svg?raw";
 import robotSvg from "../assets/robot.svg?raw";
 import { BatteryIcon } from "../components/battery-icon";
+import { ConnectionDiag } from "../components/connection-diag";
 import { ErrorBanner, ErrorBannerStack, useErrorStack } from "../components/error-banner";
 import { Icon } from "../components/icon";
 import { useNavigate } from "../components/router";
@@ -356,9 +357,7 @@ export function DashboardView({ firmware, state, isManual, updateInfo, robotRead
                         <Icon svg={robotSvg} />
                     </div>
                     {identifying ? (
-                        <p class="gate-message">
-                            <T>Connecting to robot...</T>
-                        </p>
+                        <ConnectionDiag />
                     ) : (
                         <div class="gate-message">
                             <Icon svg={alertSvg} />

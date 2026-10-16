@@ -20,6 +20,7 @@ import {
     MAX_VERTICES,
 } from "../floor-map";
 import { pinSession } from "../floor-map-pin";
+import { type GuidedTrace, parseGuidedTrace } from "../guided-trace";
 import { useDirtyGuard } from "../hooks/use-dirty-guard";
 import { type LocMap, parseLocMap } from "../loc-map";
 import { usePolling } from "../hooks/use-polling";
@@ -27,7 +28,7 @@ import { T, useI18n } from "../i18n";
 import type { GuidedStatus, HistoryFileInfo, StateData } from "../types";
 import { normalizeError } from "../utils";
 import { fitView, hitVertex, type MapView, renderFloorMap, type Screen } from "./floor-map/canvas";
-import { CleanPanel, EditPanel, type EditTarget, MappingCard, SessionPicker } from "./floor-map/panels";
+import { CleanPanel, EditPanel, type EditTarget, MappingCard, SessionPicker, TraceCard } from "./floor-map/panels";
 import { useEditorGestures } from "./floor-map/use-editor-gestures";
 
 interface FloorMapViewProps {
@@ -139,6 +140,17 @@ export function FloorMapView({ state, robotReady }: FloorMapViewProps) {
     const active = status?.active ?? false;
     useEffect(() => setFastPoll(active), [active]);
 
+    // -- Last run trace (analysis overlay) ---------------------------------------------
+    const [trace, setTrace] = useState<GuidedTrace | null>(null);
+    const [showTrace, setShowTrace] = useState(false);
+    const finishedAt = active ? 0 : (status?.startedAt ?? 0);
+    useEffect(() => {
+        if (active) return;
+        api.getGuidedTrace()
+            .then((text) => setTrace(text ? parseGuidedTrace(text) : null))
+            .catch(() => setTrace(null));
+    }, [active, finishedAt]);
+
     const lastStart = useRef<number>(0);
     useEffect(() => {
         if (!status) return;
@@ -210,10 +222,11 @@ export function FloorMapView({ state, robotReady }: FloorMapViewProps) {
                 trail,
                 showPath: tab === "edit",
                 loc,
+                trace: tab === "clean" && showTrace && !active ? trace : null,
             },
             labelFor,
         );
-    }, [map, tab, selection, editTarget, activeVertex, draft, status, trail, labelFor, loc]);
+    }, [map, tab, selection, editTarget, activeVertex, draft, status, trail, labelFor, loc, trace, showTrace]);
 
     useEffect(() => {
         const id = requestAnimationFrame(redraw);
@@ -572,26 +585,37 @@ export function FloorMapView({ state, robotReady }: FloorMapViewProps) {
                         </div>
 
                         {tab === "clean" ? (
-                            <CleanPanel
-                                map={map}
-                                selection={selection}
-                                status={status}
-                                canStart={canStart}
-                                startHint={startHint}
-                                pending={pendingAction}
-                                onToggle={(id) =>
-                                    setSelection((prev) => {
-                                        const next = new Set(prev);
-                                        if (next.has(id)) next.delete(id);
-                                        else next.add(id);
-                                        return next;
-                                    })
-                                }
-                                onSelectAll={(all) => setSelection(new Set(all ? map.rooms.map((r) => r.id) : []))}
-                                onStart={() => runGuided(() => api.guidedStart([...selection].sort((a, b) => a - b)))}
-                                onHome={() => runGuided(api.guidedHome)}
-                                onStop={() => runGuided(api.guidedStop)}
-                            />
+                            <>
+                                <CleanPanel
+                                    map={map}
+                                    selection={selection}
+                                    status={status}
+                                    canStart={canStart}
+                                    startHint={startHint}
+                                    pending={pendingAction}
+                                    onToggle={(id) =>
+                                        setSelection((prev) => {
+                                            const next = new Set(prev);
+                                            if (next.has(id)) next.delete(id);
+                                            else next.add(id);
+                                            return next;
+                                        })
+                                    }
+                                    onSelectAll={(all) => setSelection(new Set(all ? map.rooms.map((r) => r.id) : []))}
+                                    onStart={() =>
+                                        runGuided(() => api.guidedStart([...selection].sort((a, b) => a - b)))
+                                    }
+                                    onHome={() => runGuided(api.guidedHome)}
+                                    onStop={() => runGuided(api.guidedStop)}
+                                />
+                                {trace && !active && (
+                                    <TraceCard
+                                        trace={trace}
+                                        shown={showTrace}
+                                        onToggle={() => setShowTrace(!showTrace)}
+                                    />
+                                )}
+                            </>
                         ) : (
                             <EditPanel
                                 map={map}

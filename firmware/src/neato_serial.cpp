@@ -1,5 +1,7 @@
 #include "neato_serial.h"
 #include "config.h"
+#include "json_fields.h"
+#include <climits>
 
 // -- Lifecycle ---------------------------------------------------------------
 
@@ -61,25 +63,110 @@ void NeatoSerial::begin(int txPin, int rxPin) {
 
 void NeatoSerial::initSKey() {
     sKeyPending = true;
-    versionCache.invalidate(); // Force a fresh fetch (don't serve a stale failure)
-    getVersion([this](bool ok, const VersionData& v) {
-        if (!ok || v.serialNumber.length() == 0) {
-            LOG("NEATO", "SKey init failed — GetVersion returned no serial, retrying in %lu ms", sKeyRetryDelay);
-            sKeyRetryAt = millis() + sKeyRetryDelay;
-            sKeyRetryDelay = (sKeyRetryDelay * 2 < SKEY_RETRY_MAX_MS) ? sKeyRetryDelay * 2 : SKEY_RETRY_MAX_MS;
-            return;
-        }
-        sKeyPending = false;
-        robotModelName = v.modelName;
-        LOG("NEATO", "Model: %s (supported=%s)", robotModelName.c_str(),
-            isSupportedModel(robotModelName) ? "yes" : "no");
-        sKey = computeSKey(v.serialNumber);
-        if (sKey.length() > 0) {
-            LOG("NEATO", "SKey computed (%d chars) from serial %s", sKey.length(), v.serialNumber.c_str());
-        } else {
-            LOG("NEATO", "SKey computation failed for serial: %s", v.serialNumber.c_str());
-        }
-    });
+    identAttempts++;
+    identAttemptAt = millis();
+    uint32_t gen = ++identGen;
+    // Talk to the robot directly (not through versionCache): a fetch that is
+    // still pending in the cache from setup() must not hold identification
+    // hostage, and the raw answer is kept for diagnostics.
+    enqueue(
+            CMD_GET_VERSION,
+            [this, gen](bool ok, const String& raw) {
+                if (gen != identGen)
+                    return; // Superseded by a watchdog retry or reidentify()
+                identLastRaw = raw.substring(0, 400);
+                VersionData v;
+                if (ok)
+                    ok = parseVersionData(raw, v);
+                if (!ok || v.serialNumber.length() == 0) {
+                    if (lastStatus == CMD_TIMEOUT)
+                        identLastError =
+                                raw.length() > 0 ? "timeout (partial answer)" : "timeout (no answer from robot)";
+                    else if (lastStatus == CMD_SERIAL_ERROR)
+                        identLastError = "answer did not match the command (desync)";
+                    else if (lastStatus == CMD_QUEUE_FULL)
+                        identLastError = "serial queue full";
+                    else if (lastStatus == CMD_UNSUPPORTED)
+                        identLastError = "GetVersion not supported";
+                    else
+                        identLastError = "no serial number in GetVersion answer";
+                    LOG("NEATO", "SKey init failed (%s), retrying in %lu ms", identLastError.c_str(), sKeyRetryDelay);
+                    sKeyRetryAt = millis() + sKeyRetryDelay;
+                    sKeyRetryDelay = (sKeyRetryDelay * 2 < SKEY_RETRY_MAX_MS) ? sKeyRetryDelay * 2 : SKEY_RETRY_MAX_MS;
+                    return;
+                }
+                sKeyPending = false;
+                identDoneAt = millis();
+                identLastError = "";
+                robotModelName = v.modelName;
+                LOG("NEATO", "Model: %s (supported=%s)", robotModelName.c_str(),
+                    isSupportedModel(robotModelName) ? "yes" : "no");
+                sKey = computeSKey(v.serialNumber);
+                if (sKey.length() > 0) {
+                    LOG("NEATO", "SKey computed (%d chars) from serial %s", sKey.length(), v.serialNumber.c_str());
+                } else {
+                    LOG("NEATO", "SKey computation failed for serial: %s", v.serialNumber.c_str());
+                }
+            },
+            PRIORITY_HIGH);
+}
+
+void NeatoSerial::reidentify() {
+    sKeyPending = true;
+    sKeyRetryDelay = SKEY_RETRY_INITIAL_MS;
+    sKeyRetryAt = 0; // Next tick
+    identGen++; // Drop the answer of an attempt still in flight
+}
+
+static const char *queueStateName(QueueState s) {
+    switch (s) {
+        case QUEUE_IDLE:
+            return "idle";
+        case QUEUE_SENDING:
+            return "sending";
+        case QUEUE_WAITING_RESPONSE:
+            return "waiting";
+        case QUEUE_INTER_DELAY:
+            return "delay";
+    }
+    return "?";
+}
+
+String NeatoSerial::getDiagJson() const {
+    unsigned long now = millis();
+    auto ago = [now](unsigned long t) -> String { return t == 0 ? String(-1) : String((now - t) / 1000); };
+    std::vector<Field> ident = {
+            {"pending", sKeyPending ? "true" : "false", FIELD_BOOL},
+            {"hasSKey", hasSKey() ? "true" : "false", FIELD_BOOL},
+            {"model", robotModelName, FIELD_STRING},
+            {"attempts", String(identAttempts), FIELD_INT},
+            {"lastAttemptAgoS", ago(identAttemptAt), FIELD_INT},
+            {"identifiedAgoS", ago(identDoneAt), FIELD_INT},
+            {"nextRetryInS",
+             String(sKeyPending && sKeyRetryAt != ULONG_MAX && sKeyRetryAt > now ? (sKeyRetryAt - now) / 1000 : 0),
+             FIELD_INT},
+            {"inFlight", sKeyPending && sKeyRetryAt == ULONG_MAX ? "true" : "false", FIELD_BOOL},
+            {"lastError", identLastError, FIELD_STRING},
+            {"lastRaw", identLastRaw, FIELD_STRING},
+    };
+    std::vector<Field> stats = {
+            {"queueDepth", String(queue.size()), FIELD_INT},
+            {"state", queueStateName(state), FIELD_STRING},
+            {"current", currentCommand, FIELD_STRING},
+            {"ok", String(statOk), FIELD_INT},
+            {"timeouts", String(statTimeout), FIELD_INT},
+            {"desyncs", String(statDesync), FIELD_INT},
+            {"unsupported", String(statUnsupported), FIELD_INT},
+            {"queueFull", String(statQueueFull), FIELD_INT},
+            {"rxBytes", String(rxBytes), FIELD_INT},
+            {"lastRxAgoS", ago(lastRxAt), FIELD_INT},
+            {"lastOkAgoS", ago(lastOkAt), FIELD_INT},
+            {"lastFailCmd", lastFailCmd, FIELD_STRING},
+            {"lastFailStatus", lastFailStatus, FIELD_STRING},
+            {"lastFailAgoS", ago(lastFailAt), FIELD_INT},
+            {"lastFailPartial", lastFailPartial, FIELD_STRING},
+    };
+    return "{\"identify\":" + fieldsToJson(ident) + ",\"serial\":" + fieldsToJson(stats) + "}";
 }
 
 String NeatoSerial::buildSetEvent(const char *event) const {
@@ -94,6 +181,16 @@ void NeatoSerial::tick() {
     if (sKeyPending && millis() >= sKeyRetryAt) {
         sKeyRetryAt = ULONG_MAX; // Prevent re-entry while fetch is in flight
         initSKey();
+    }
+    // Watchdog: an identification attempt whose answer never arrives (callback
+    // lost, queue stuck behind other commands) is retried instead of leaving the
+    // UI on "Connecting to robot" forever.
+    if (sKeyPending && sKeyRetryAt == ULONG_MAX && millis() - identAttemptAt > SKEY_ATTEMPT_TIMEOUT_MS) {
+        identLastError = "no result within " + String(SKEY_ATTEMPT_TIMEOUT_MS / 1000) + " s (queue " +
+                         String(queue.size()) + ", state " + queueStateName(state) + ")";
+        LOG("NEATO", "SKey init: %s — retrying", identLastError.c_str());
+        identGen++;
+        sKeyRetryAt = millis() + 1000;
     }
 
     switch (state) {
@@ -111,6 +208,8 @@ void NeatoSerial::tick() {
             // Read all available bytes
             while (uart.available()) {
                 char c = static_cast<char>(uart.read());
+                rxBytes++;
+                lastRxAt = millis();
                 if (c == NEATO_RESPONSE_TERMINATOR) {
                     unsigned long elapsed = millis() - commandSentAt;
                     LOG("NEATO", "RX: %u bytes in %lu ms", responseBuffer.length(), elapsed);
@@ -165,6 +264,8 @@ bool NeatoSerial::enqueue(const String& command, std::function<void(bool, const 
                           CommandPriority priority, bool waitForResponse) {
     if (static_cast<int>(queue.size()) >= NEATO_QUEUE_MAX_SIZE) {
         LOG("NEATO", "Queue full, rejecting: %s", command.c_str());
+        statQueueFull++;
+        lastStatus = CMD_QUEUE_FULL;
         if (loggerCallback)
             loggerCallback(command, CMD_QUEUE_FULL, 0, "", static_cast<int>(queue.size()), 0, 0);
         if (callback)
@@ -281,6 +382,27 @@ void NeatoSerial::completeCommand(CommandStatus status, const String& response) 
     // Start inter-command delay before next command
     delayStartedAt = millis();
     state = QUEUE_INTER_DELAY;
+
+    // Diagnostics (always on)
+    lastStatus = status;
+    if (status == CMD_SUCCESS) {
+        statOk++;
+        lastOkAt = millis();
+    } else {
+        if (status == CMD_TIMEOUT)
+            statTimeout++;
+        else if (status == CMD_SERIAL_ERROR)
+            statDesync++;
+        else if (status == CMD_UNSUPPORTED)
+            statUnsupported++;
+        lastFailCmd = cmd;
+        lastFailStatus = status == CMD_TIMEOUT        ? "timeout"
+                         : status == CMD_SERIAL_ERROR ? "desync"
+                         : status == CMD_UNSUPPORTED  ? "unsupported"
+                                                      : "error";
+        lastFailPartial = resp.substring(0, 200);
+        lastFailAt = millis();
+    }
 
     // Fire logger hook before user callback with enhanced metadata
     if (loggerCallback)
