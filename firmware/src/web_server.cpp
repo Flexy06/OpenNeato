@@ -552,6 +552,7 @@ void WebServer::registerGuidedRoutes() {
         }
         historyMgr.armScanRecording();
         if (!neato.clean("house", nullptr)) {
+            historyMgr.disarmScanRecording();
             sendError(request, 503, "robot not ready");
             return 503;
         }

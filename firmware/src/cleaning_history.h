@@ -53,6 +53,7 @@ public:
     // with the robot's own SLAM pose, so the frontend can build a wall map for
     // guided-clean localization. Cleared when the session ends.
     void armScanRecording() { scanArmed = true; }
+    void disarmScanRecording() { scanArmed = false; }
     bool isScanRecording() const { return scanRecording || scanArmed; }
 
     // -- Session import (upload from browser, compress-on-write) ---------------

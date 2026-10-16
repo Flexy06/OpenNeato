@@ -78,7 +78,13 @@ export function App() {
     }, [distanceUnit]);
 
     const state = usePolling<StateData>(api.getState, 2000);
-    const firmware = usePolling<FirmwareVersion>(api.getFirmwareVersion, 60000);
+    // Poll quickly until the robot is identified (after boot/OTA the first answer is
+    // usually "identifying" or a failed fetch), then once a minute.
+    const [firmwareFast, setFirmwareFast] = useState(true);
+    const firmware = usePolling<FirmwareVersion>(api.getFirmwareVersion, firmwareFast ? 3000 : 60000);
+    useEffect(() => {
+        setFirmwareFast(!firmware.data || firmware.data.identifying);
+    }, [firmware.data]);
 
     // --- Update check (browser-side, GitHub releases API) ---
     const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
