@@ -138,7 +138,21 @@ export function buildLocMap(scans: MapScan[]): LocMap | null {
     // Distance transform (two-pass chamfer, in mm)
     const INF = 1e9;
     const dist = new Float32Array(w * h);
-    for (let i = 0; i < w * h; i++) dist[i] = hits[i] >= 2 ? 0 : INF;
+    // Walls: hit by at least two scans and not an isolated speck (a single cell
+    // without any occupied neighbour is mostly noise: people, cables, smeared returns)
+    const occ = (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h && hits[y * w + x] >= 2;
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            let wall = occ(x, y);
+            if (wall) {
+                let n = 0;
+                for (let dy = -1; dy <= 1; dy++)
+                    for (let dx = -1; dx <= 1; dx++) if ((dx || dy) && occ(x + dx, y + dy)) n++;
+                wall = n > 0;
+            }
+            dist[y * w + x] = wall ? 0 : INF;
+        }
+    }
     const d1 = cell;
     const d2 = cell * Math.SQRT2;
     for (let y = 0; y < h; y++) {

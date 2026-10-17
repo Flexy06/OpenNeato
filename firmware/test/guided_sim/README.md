@@ -39,6 +39,7 @@ Scenarios (two rooms joined by a door, one no-go zone in room 2):
 | room 1 only               | recording detours via room 2 — robot must not follow it |
 | heavy drift with map      | 2% wheel slip + wrong wheel base, corrected by map matching |
 | no map field              | compass fallback without a localization field           |
+| map origin off the dock   | recording origin ≠ dock: docking uses the measured dock pose |
 
 The model is deliberately simple (no wheel inertia, perfect encoders apart from
 slip, no carpet). Passing it means the control logic is consistent; it does not

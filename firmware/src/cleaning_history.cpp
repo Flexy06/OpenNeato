@@ -817,7 +817,7 @@ void CleaningHistory::collectScan(float x0, float y0, float t0) {
         }
         return;
     }
-    neato.getLdsScan([this, x0, y0, t0](bool ok, const LdsScanData& scan) {
+    neato.getLdsScanFresh([this, x0, y0, t0](bool ok, const LdsScanData& scan) {
         if (!ok || !collecting || !scanRecording) {
             fetchPending = false;
             return;

@@ -143,6 +143,7 @@ public:
         }
         return best;
     }
+    void getLdsScanFresh(std::function<void(bool, const LdsScanData&)> cb) { getLdsScan(cb); }
     void getLdsScan(std::function<void(bool, const LdsScanData&)> cb) {
         later([this, cb] {
             auto* d = new LdsScanData();

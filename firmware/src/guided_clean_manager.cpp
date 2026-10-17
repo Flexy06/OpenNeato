@@ -257,9 +257,9 @@ String GuidedCleanManager::buildPlan(const FloorMapData& map, const String& room
 
 // -- Cleaning runs ----------------------------------------------------------------
 
-// Free floor for the robot centre at (x, y): ≥ ~220 mm from walls in the LIDAR
-// map (or driven over during the recording), reachable from the dock and clear
-// of no-go zones.
+// Free floor for a lane point at (x, y): ≥ ~170 mm from mapped returns in the
+// LIDAR map (or driven over during the recording), reachable from the dock and
+// clear of no-go zones.
 bool GuidedCleanManager::floorFree(float x, float y) const {
     int cx = 0;
     int cy = 0;
@@ -269,7 +269,7 @@ bool GuidedCleanManager::floorFree(float x, float y) const {
     if (nearNogo(x, y))
         return false;
     if (field.valid() && field.inside(x, y))
-        return field.at(x, y) <= GUIDED_FIELD_FREE_MAX;
+        return field.at(x, y) <= GUIDED_FIELD_LANE_MAX || cover.covered(x, y);
     return cover.covered(x, y);
 }
 
@@ -843,7 +843,10 @@ void GuidedCleanManager::onTransitBlocked() {
     } else if (!fallbackHome) {
         fallbackReturn();
     } else {
-        fail("path back to the dock is blocked");
+        // Blocked twice on the way home: the robot's own navigation finds the dock
+        LOG("GUIDED", "Way home blocked — handing over to the robot's own docking");
+        fallbackDock = true;
+        finish(Phase::Done, "way home blocked — the robot docks itself");
     }
 }
 
@@ -879,12 +882,11 @@ void GuidedCleanManager::fallbackReturn() {
         w.y = crumbs[i].y;
         back.push_back(w);
     }
+    fromDock(GUIDED_DOCK_STAGING_MM, 0.0f, legGoalX, legGoalY);
     Waypoint staging;
-    staging.x = GUIDED_DOCK_STAGING_MM;
-    staging.y = 0;
+    staging.x = static_cast<int16_t>(legGoalX);
+    staging.y = static_cast<int16_t>(legGoalY);
     back.push_back(staging);
-    legGoalX = GUIDED_DOCK_STAGING_MM;
-    legGoalY = 0.0f;
     setLeg(back, true);
     legReplans = GUIDED_MAX_REPLANS + 1; // No further re-planning on this leg
 }
@@ -936,6 +938,9 @@ String GuidedCleanManager::command(const String& action, const String& rooms) {
         obstacleTotal = 0;
         fallbackDock = false;
         dockWatchSince = 0;
+        dockX = 0.0f;
+        dockY = 0.0f;
+        dockT = 0.0f;
         inTestMode = false;
         dockStage = 0;
         dockAttempts = 0;
@@ -1604,6 +1609,16 @@ bool GuidedCleanManager::driveTowards(float tx, float ty, int speed, bool allowR
     // target (pure pursuit) instead of stopping to turn in place first.
     if (dir > 0 && !allowReverse && fabsf(err) <= GUIDED_ARC_MAX_DEG * DEG) {
         float look = dist < GUIDED_MAX_STEP_MM ? dist : static_cast<float>(GUIDED_MAX_STEP_MM);
+        // The arc bulges away from the straight line that was checked against walls and
+        // no-go zones (sagitta = look/2 · tan(err/2)): keep that bulge small
+        float half = tanf(fabsf(err) / 2.0f);
+        if (half > 0.001f && look / 2.0f * half > GUIDED_ARC_MAX_BULGE_MM)
+            look = 2.0f * GUIDED_ARC_MAX_BULGE_MM / half;
+        if (look < 80.0f) {
+            int arc = static_cast<int>(err * GUIDED_WHEEL_BASE_MM / 2.0f);
+            startSegment(SegKind::Turn, -arc, arc, GUIDED_SPEED_TURN);
+            return true;
+        }
         float l = look;
         float r = look;
         if (fabsf(err) > 1.0f * DEG) {
@@ -1681,8 +1696,7 @@ void GuidedCleanManager::beginReturn(const String& reason) {
     }
 
     // Shortest known-free path to the staging point on the dock axis
-    legGoalX = GUIDED_DOCK_STAGING_MM;
-    legGoalY = 0.0f;
+    fromDock(GUIDED_DOCK_STAGING_MM, 0.0f, legGoalX, legGoalY);
     std::vector<Waypoint> path;
     if (planPath(legGoalX, legGoalY, path)) {
         setLeg(path, true);
@@ -1719,9 +1733,18 @@ void GuidedCleanManager::stepDocking() {
     const float staging = GUIDED_DOCK_STAGING_MM;
     const float preback = GUIDED_DOCK_PREBACK_MM;
     bool canMatch = field.valid() || (refScanValid && compassSign != 0);
+    // Work in the dock frame (dock pose measured on the dock at the start; the
+    // map origin is where the recording started, which is not exactly the dock)
+    float lx = 0.0f;
+    float ly = 0.0f;
+    toDock(poseX, poseY, lx, ly);
+    float lt = wrapAngle(poseTheta - dockT);
+    float sx = 0.0f;
+    float sy = 0.0f;
+    fromDock(staging, 0.0f, sx, sy);
 
-    auto faceZero = [this](float tolDeg) {
-        float err = wrapAngle(0.0f - poseTheta);
+    auto faceZero = [this, lt](float tolDeg) {
+        float err = wrapAngle(0.0f - lt);
         if (fabsf(err) > tolDeg * DEG) {
             int arc = static_cast<int>(err * GUIDED_WHEEL_BASE_MM / 2.0f);
             startSegment(SegKind::Turn, -arc, arc, GUIDED_SPEED_TURN);
@@ -1743,8 +1766,8 @@ void GuidedCleanManager::stepDocking() {
             return;
         case 4:
             // After a correction: only re-drive if we are clearly off the staging point
-            if (fabsf(poseY) > 150.0f || fabsf(poseX - staging) > 250.0f) {
-                if (driveTowards(staging, 0.0f, GUIDED_SPEED_SLOW, true, 60))
+            if (fabsf(ly) > 150.0f || fabsf(lx - staging) > 250.0f) {
+                if (driveTowards(sx, sy, GUIDED_SPEED_SLOW, true, 60))
                     return;
                 dockStage = 0;
                 return;
@@ -1752,23 +1775,23 @@ void GuidedCleanManager::stepDocking() {
             dockStage = 6;
             return;
         case 6: {
-            if (poseX <= preback + 20.0f) {
+            if (lx <= preback + 20.0f) {
                 dockStage = 7;
                 return;
             }
             // Reverse pure-pursuit: aim the rear at a point on the axis behind us
-            float tx = poseX - 350.0f;
+            float tx = lx - 350.0f;
             if (tx < preback)
                 tx = preback;
-            float want = atan2f(poseY - 0.0f, poseX - tx); // Heading with the rear towards (tx, 0)
-            float err = wrapAngle(want - poseTheta);
+            float want = atan2f(ly - 0.0f, lx - tx); // Heading with the rear towards (tx, 0)
+            float err = wrapAngle(want - lt);
             if (fabsf(err) > 3.0f * DEG) {
                 int arc = static_cast<int>(err * GUIDED_WHEEL_BASE_MM / 2.0f);
                 startSegment(SegKind::Turn, -arc, arc, GUIDED_SPEED_TURN);
                 return;
             }
-            float dx = poseX - tx;
-            float dy = poseY;
+            float dx = lx - tx;
+            float dy = ly;
             int stepMM = static_cast<int>(fminf(sqrtf(dx * dx + dy * dy), 250.0f));
             if (stepMM < 20) {
                 dockStage = 7;
@@ -1785,7 +1808,7 @@ void GuidedCleanManager::stepDocking() {
                 requestIcpScan(7);
                 return;
             }
-            if (fabsf(poseY) > GUIDED_DOCK_LATERAL_TOL_MM) {
+            if (fabsf(ly) > GUIDED_DOCK_LATERAL_TOL_MM) {
                 // Too far off the axis for a straight back-in: pull forward and redo the line-up
                 dockAttempts++;
                 if (dockAttempts >= GUIDED_DOCK_ATTEMPTS) {
@@ -1801,7 +1824,7 @@ void GuidedCleanManager::stepDocking() {
             return;
         case 5: {
             dockStage = 1;
-            int back = static_cast<int>(poseX) + 60; // Overshoot slightly: the dock stops us
+            int back = static_cast<int>(lx) + 60; // Overshoot slightly: the dock stops us
             startSegment(SegKind::DockBack, -back, -back, GUIDED_SPEED_SLOW);
             return;
         }
@@ -2068,12 +2091,18 @@ void GuidedCleanManager::requestLocScan(int radiusMM, int angleDeg, uint8_t resu
         turnSinceFix = 0.0f;
         if (resumeStage != 0xFF)
             dockStage = resumeStage;
-        if (ok && dockScanPending) {
+        bool first = ok && dockScanPending;
+        if (first) {
             dockScanPending = false;
             traceDockScan(scan);
         }
-        if (ok)
-            matchField(scan, radiusMM, angleDeg);
+        if (ok && matchField(scan, radiusMM, angleDeg) && first) {
+            // The robot sits on the dock: this fix is where the dock is in the map
+            dockX = poseX;
+            dockY = poseY;
+            dockT = poseTheta;
+            tracePose("dock_pose", {});
+        }
     });
 }
 
@@ -2526,7 +2555,7 @@ bool GuidedCleanManager::hasTrace() const {
 // of the ~6 KB parse frame and overflowed the 8 KB loop stack on the ESP32.
 void GuidedCleanManager::fetchScan(std::function<void(bool, const LdsScanData&)> handler) {
     uint32_t gen = runGen;
-    serial.getLdsScan([this, gen, handler](bool ok, const LdsScanData& scan) {
+    serial.getLdsScanFresh([this, gen, handler](bool ok, const LdsScanData& scan) {
         if (gen != runGen)
             return;
         if (ok)
@@ -2551,4 +2580,21 @@ void GuidedCleanManager::traceDockScan(const LdsScanData& scan) {
         pts += String(p.angleDeg) + ":" + String(p.distMM) + ":" + String(p.intensity) + " ";
     }
     tracePose("dockscan", {{"pts", pts, FIELD_STRING}});
+}
+
+// Dock frame: origin on the dock contacts, +x = the robot's heading when docked
+void GuidedCleanManager::toDock(float x, float y, float& lx, float& ly) const {
+    float c = cosf(dockT);
+    float sn = sinf(dockT);
+    float dx = x - dockX;
+    float dy = y - dockY;
+    lx = c * dx + sn * dy;
+    ly = -sn * dx + c * dy;
+}
+
+void GuidedCleanManager::fromDock(float lx, float ly, float& x, float& y) const {
+    float c = cosf(dockT);
+    float sn = sinf(dockT);
+    x = dockX + c * lx - sn * ly;
+    y = dockY + sn * lx + c * ly;
 }

@@ -512,6 +512,11 @@ void NeatoSerial::getLdsScan(std::function<void(bool, const LdsScanData&)> callb
     ldsCache.get(callback);
 }
 
+void NeatoSerial::getLdsScanFresh(std::function<void(bool, const LdsScanData&)> callback) {
+    ldsCache.invalidate();
+    ldsCache.get(callback);
+}
+
 void NeatoSerial::getRobotPos(bool smooth, std::function<void(bool, const RobotPosData&)> callback) {
     (smooth ? robotPosSmoothCache : robotPosRawCache).get(callback);
 }

@@ -69,6 +69,9 @@ public:
     void getErr(std::function<void(bool, const ErrorData&)> callback);
     void getErrClear(std::function<void(bool, const ErrorData&)> callback);
     void getLdsScan(std::function<void(bool, const LdsScanData&)> callback);
+    // Always a scan taken after this call (the cache may hold one up to 1.5 s old —
+    // useless for localization after the robot moved or turned)
+    void getLdsScanFresh(std::function<void(bool, const LdsScanData&)> callback);
     void getRobotPos(bool smooth, std::function<void(bool, const RobotPosData&)> callback);
     // -- Action commands (fire-and-forget by default) ------------------------
 

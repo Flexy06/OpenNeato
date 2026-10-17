@@ -311,6 +311,12 @@ private:
     void beginReturn(const String& reason);
     void beginDocking();
     void checkDocked();
+    // Dock pose in the map frame (measured on the dock by the first scan match)
+    float dockX = 0.0f;
+    float dockY = 0.0f;
+    float dockT = 0.0f;
+    void toDock(float x, float y, float& lx, float& ly) const;
+    void fromDock(float lx, float ly, float& x, float& y) const;
     void onDockMissed();
     // Robot's own docking after the hand-over: verified for a while
     unsigned long dockWatchSince = 0;

@@ -61,17 +61,28 @@ static std::vector<Pt> recordedPath() {
     return p;
 }
 
+// Map frame = world + offset: the recording's origin is not exactly the dock
+// (seen on the real robot: dock ~29 cm off the map origin)
+static int g_mapOffX = 0;
+static int g_mapOffY = 0;
+
+static std::string mapPt(int x, int y) {
+    return std::to_string(x + g_mapOffX) + "," + std::to_string(y + g_mapOffY);
+}
+
 static std::string buildMapDoc(const std::vector<Pt>& path) {
     std::string d = "OFM1\nS sim.jsonl\n";
     for (size_t i = 0; i < path.size(); i += 50) {
         d += "P";
         for (size_t j = i; j < path.size() && j < i + 50; j++)
-            d += " " + std::to_string(static_cast<int>(path[j].x)) + "," + std::to_string(static_cast<int>(path[j].y));
+            d += " " + mapPt(static_cast<int>(path[j].x), static_cast<int>(path[j].y));
         d += "\n";
     }
-    d += "R 1 Wohnzimmer -170,-2000 3000,-2000 3000,2000 -170,2000\n";
-    d += "R 2 K%C3%BCche 3000,-2000 6000,-2000 6000,2000 3000,2000\n";
-    d += "N 1 4200,600 4900,600 4900,1400 4200,1400\n";
+    d += "R 1 Wohnzimmer " + mapPt(-170, -2000) + " " + mapPt(3000, -2000) + " " + mapPt(3000, 2000) + " " +
+         mapPt(-170, 2000) + "\n";
+    d += "R 2 K%C3%BCche " + mapPt(3000, -2000) + " " + mapPt(6000, -2000) + " " + mapPt(6000, 2000) + " " +
+         mapPt(3000, 2000) + "\n";
+    d += "N 1 " + mapPt(4200, 600) + " " + mapPt(4900, 600) + " " + mapPt(4900, 1400) + " " + mapPt(4200, 1400) + "\n";
     return d;
 }
 
@@ -119,8 +130,8 @@ static std::string buildField(const NeatoSerial& s) {
     std::string out = "OFL1";
     auto put32 = [&](int32_t v) { for (int i = 0; i < 4; i++) out += static_cast<char>((v >> (8 * i)) & 255); };
     auto put16 = [&](int16_t v) { out += static_cast<char>(v & 255); out += static_cast<char>((v >> 8) & 255); };
-    put32(ox);
-    put32(oy);
+    put32(ox + g_mapOffX);
+    put32(oy + g_mapOffY);
     put16(cell);
     put16(static_cast<int16_t>(w));
     put16(static_cast<int16_t>(h));
@@ -193,12 +204,17 @@ static Result runScenario(const char *name, const char *rooms, std::function<voi
         serial.physics(0.010);
         serial.runDue();
         TaskRegistry::tickAll();
-        minNogo = std::min(minNogo, rectDist(serial.tx, serial.ty, 4200, 600, 4900, 1400));
+        {
+            double nd = rectDist(serial.tx, serial.ty, 4200, 600, 4900, 1400);
+            if (nd < 0 && minNogo >= 0)
+                std::printf("  !! entered no-go at %.0f,%.0f: %s\n", serial.tx, serial.ty, guided.getStatusJson().c_str());
+            minNogo = std::min(minNogo, nd);
+        }
         maxX = std::max(maxX, serial.tx);
         if (guided.isActive() && (g_simMillis - 1) % 1000 == 0) {
             std::string st = guided.getStatusJson().str();
             auto num = [&](const char *k) { auto p = st.find(std::string("\"") + k + "\":"); return p == std::string::npos ? 0.0 : std::atof(st.c_str() + p + std::strlen(k) + 3); };
-            double e = std::hypot(num("x") * 1000 - serial.tx, num("y") * 1000 - serial.ty);
+            double e = std::hypot(num("x") * 1000 - g_mapOffX - serial.tx, num("y") * 1000 - g_mapOffY - serial.ty);
             maxErr = std::max(maxErr, e); sumErr += e; errSamples++;
         }
         if (serial.brush && serial.tx > 3000) {
@@ -363,6 +379,16 @@ int main(int argc, char **argv) {
     expect(k.minNogoDist > 0, "avoids no-go with offset LIDAR");
 
     expect(g_traceFailures == 0, "every started run leaves a complete trace");
+
+    // The recording's origin is 29 cm in front of the dock: docking must use the
+    // dock pose measured by the first scan match, not the map origin
+    g_mapOffX = 290;
+    g_mapOffY = 40;
+    Result o = runScenario("map origin off the dock", "2", [](NeatoSerial&) {});
+    g_mapOffX = 0;
+    g_mapOffY = 0;
+    expect(o.phase == "done" && o.docked, "docks although the map origin is not the dock");
+    expect(o.minNogoDist > 0, "avoids no-go with an offset map origin");
 
     std::printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "ALL PASSED", failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;
