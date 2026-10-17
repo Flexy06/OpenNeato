@@ -49,6 +49,13 @@ public:
     // instead of waiting for the next idle-interval tick.
     void notifyCleanStart();
 
+    // Mapping run: the next (or current) house clean also records LIDAR scans
+    // with the robot's own SLAM pose, so the frontend can build a wall map for
+    // guided-clean localization. Cleared when the session ends.
+    void armScanRecording() { scanArmed = true; }
+    void disarmScanRecording() { scanArmed = false; }
+    bool isScanRecording() const { return scanRecording || scanArmed; }
+
     // -- Session import (upload from browser, compress-on-write) ---------------
     // Called by WebServer upload handler. Receives raw JSONL data from the browser,
     // compresses it via heatshrink, and writes directly to /history/<name>.jsonl.hs.
@@ -76,6 +83,10 @@ private:
     bool fetchPending = false;
     bool recoveryAttempted = false; // Only try orphan recovery once after boot
     size_t snapshotCount = 0;
+    bool scanArmed = false;
+    bool scanRecording = false;
+    size_t scanCount = 0;
+    void collectScan(float x0, float y0, float t0);
 
     // Active session file (open during collection, closed at end)
     File activeFile;

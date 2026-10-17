@@ -7,90 +7,105 @@
 }
 
 :root {
-    --bg: #161618;
-    --surface: #1a1a1c;
-    --surface-raised: #2a2a2e;
-    --border: rgba(255, 255, 255, 0.06);
-    --border-accent: rgba(249, 235, 178, 0.12);
-    --text: #f0f0f2;
-    --text-dim: #8a8a8e;
-    --text-muted: #48484a;
-    --accent: #f9ebb2;
-    --accent-dim: rgba(249, 235, 178, 0.6);
-    --green: #34c759;
-    --amber: #e5972a;
-    --red: #ff453a;
-    --blue: #3b9eff;
-    --purple: #bf5af2;
+    --bg: #0d0e13;
+    --surface: #161821;
+    --surface-raised: #232634;
+    --border: rgba(255, 255, 255, 0.07);
+    --border-accent: rgba(141, 155, 255, 0.28);
+    --text: #f3f4f8;
+    --text-dim: #9ba0b3;
+    --text-muted: #5a5f73;
+    --accent: #8d9bff;
+    --accent-dim: rgba(141, 155, 255, 0.6);
+    --accent-grad: linear-gradient(135deg, #6a7dff 0%, #9b6bff 100%);
+    --accent-glow: rgba(110, 125, 255, 0.35);
+    --green: #3ddc84;
+    --amber: #ffb547;
+    --red: #ff5c6c;
+    --blue: #4da3ff;
+    --purple: #b57bff;
     --cyan: #5ac8fa;
     --teal: #30d5c8;
     --pink: #ff6b9d;
-    --bg-gradient-center: #38383e;
-    --bg-gradient-mid: #232328;
-    --bg-gradient-outer: #161618;
-    --gear-btn-bg: #333336;
-    --gear-icon-color: #9a9a9e;
-    --card-bg: rgba(30, 30, 32, 0.8);
-    --btn-color: #c6c2bc;
+    --bg-gradient-center: #1d2131;
+    --bg-gradient-mid: #12141c;
+    --bg-gradient-outer: #0b0c10;
+    --gear-btn-bg: rgba(255, 255, 255, 0.06);
+    --gear-icon-color: #c2c6d6;
+    --card-bg: rgba(255, 255, 255, 0.035);
+    --btn-color: #dfe2ee;
+    --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+    --highlight: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    --radius: 20px;
 }
 
 /* Light theme — applied via class or system preference */
 
 .light {
-    --bg: #ffffff;
-    --surface: #e5e5ea;
-    --surface-raised: #dcdce0;
-    --border: rgba(0, 0, 0, 0.08);
-    --border-accent: rgba(201, 165, 102, 0.2);
-    --text: #1d1d1f;
-    --text-dim: #6e6e73;
-    --text-muted: #a1a1a6;
-    --accent: #c9a566;
-    --accent-dim: rgba(201, 165, 102, 0.6);
-    --green: #28a745;
-    --amber: #d68910;
-    --red: #dc3545;
-    --blue: #007aff;
-    --purple: #a550d6;
+    --bg: #f4f5f9;
+    --surface: #ffffff;
+    --surface-raised: #eceef5;
+    --border: rgba(20, 24, 40, 0.08);
+    --border-accent: rgba(84, 102, 245, 0.25);
+    --text: #141725;
+    --text-dim: #5c6278;
+    --text-muted: #a2a7b8;
+    --accent: #5466f5;
+    --accent-dim: rgba(84, 102, 245, 0.6);
+    --accent-grad: linear-gradient(135deg, #5466f5 0%, #8a5cf6 100%);
+    --accent-glow: rgba(84, 102, 245, 0.25);
+    --green: #1fa35a;
+    --amber: #d98a00;
+    --red: #e5384a;
+    --blue: #1a7cf0;
+    --purple: #8a5cf6;
     --cyan: #0a84c4;
-    --teal: #25a99e;
+    --teal: #1f9d93;
     --pink: #e8457a;
-    --bg-gradient-center: #eff0f5;
-    --bg-gradient-mid: #f5f5f9;
-    --bg-gradient-outer: #ffffff;
-    --gear-btn-bg: #e5e5ea;
-    --gear-icon-color: #6e6e73;
-    --btn-color: #6e6e73;
-    --card-bg: rgba(0, 0, 0, 0.06);
+    --bg-gradient-center: #ffffff;
+    --bg-gradient-mid: #f4f5fa;
+    --bg-gradient-outer: #eceef5;
+    --gear-btn-bg: rgba(255, 255, 255, 0.85);
+    --gear-icon-color: #4b5168;
+    --btn-color: #3c4258;
+    --card-bg: rgba(255, 255, 255, 0.78);
+    --shadow: 0 8px 24px rgba(30, 40, 80, 0.08);
+    --highlight: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    --radius: 20px;
 }
 
 @media (prefers-color-scheme: light) {
     .system-theme {
-        --bg: #ffffff;
-        --surface: #e5e5ea;
-        --surface-raised: #dcdce0;
-        --border: rgba(0, 0, 0, 0.08);
-        --border-accent: rgba(201, 165, 102, 0.2);
-        --text: #1d1d1f;
-        --text-dim: #6e6e73;
-        --text-muted: #a1a1a6;
-        --accent: #c9a566;
-        --accent-dim: rgba(201, 165, 102, 0.6);
-        --green: #28a745;
-        --amber: #d68910;
-        --red: #dc3545;
-        --blue: #007aff;
-        --purple: #a550d6;
+        --bg: #f4f5f9;
+        --surface: #ffffff;
+        --surface-raised: #eceef5;
+        --border: rgba(20, 24, 40, 0.08);
+        --border-accent: rgba(84, 102, 245, 0.25);
+        --text: #141725;
+        --text-dim: #5c6278;
+        --text-muted: #a2a7b8;
+        --accent: #5466f5;
+        --accent-dim: rgba(84, 102, 245, 0.6);
+        --accent-grad: linear-gradient(135deg, #5466f5 0%, #8a5cf6 100%);
+        --accent-glow: rgba(84, 102, 245, 0.25);
+        --green: #1fa35a;
+        --amber: #d98a00;
+        --red: #e5384a;
+        --blue: #1a7cf0;
+        --purple: #8a5cf6;
         --cyan: #0a84c4;
-        --teal: #25a99e;
+        --teal: #1f9d93;
         --pink: #e8457a;
-        --bg-gradient-center: #eff0f5;
-        --bg-gradient-mid: #f5f5f9;
-        --bg-gradient-outer: #ffffff;
-        --gear-btn-bg: #e5e5ea;
-        --gear-icon-color: #6e6e73;
-        --btn-color: #6e6e73;
-        --card-bg: rgba(0, 0, 0, 0.06);
+        --bg-gradient-center: #ffffff;
+        --bg-gradient-mid: #f4f5fa;
+        --bg-gradient-outer: #eceef5;
+        --gear-btn-bg: rgba(255, 255, 255, 0.85);
+        --gear-icon-color: #4b5168;
+        --btn-color: #3c4258;
+        --card-bg: rgba(255, 255, 255, 0.78);
+        --shadow: 0 8px 24px rgba(30, 40, 80, 0.08);
+        --highlight: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+        --radius: 20px;
     }
 }
 
@@ -2848,6 +2863,19 @@ input:disabled {
     white-space: nowrap;
 }
 
+.floormap-badge {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    background: var(--accent-grad);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    vertical-align: middle;
+}
+
 .history-pin-btn {
     display: block;
     margin: 10px auto 0;
@@ -3512,4 +3540,192 @@ input:disabled {
     .info-card-value {
         font-size: 28px;
     }
+}
+
+/* -- Visual refresh --------------------------------------------------------
+   Shared surface language on top of the component styles above: glassy
+   cards with a hairline highlight, larger radii, gradient primary actions. */
+
+body {
+    font-family:
+        -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", Roboto, system-ui,
+        sans-serif;
+    font-feature-settings: "ss01", "tnum";
+}
+
+.header h1 {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+}
+
+.header-right-btn,
+.header-back-btn,
+.history-rotate-btn {
+    border: 1px solid var(--border);
+    background: var(--gear-btn-bg);
+    box-shadow: var(--highlight);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+}
+
+.info-card,
+.status-bar,
+.settings-category,
+.history-session-row,
+.history-detail-stats,
+.history-canvas-wrap,
+.history-recovery,
+.floormap-panel,
+.floormap-tabs,
+.sched-row,
+.settings-battery-card,
+.settings-about-card,
+.logs-file-row,
+.schedule-banner,
+.update-banner {
+    border: 1px solid var(--border);
+    background: var(--card-bg);
+    box-shadow: var(--shadow), var(--highlight);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+}
+
+.info-card,
+.settings-category,
+.history-canvas-wrap,
+.floormap-panel,
+.history-detail-stats {
+    border-radius: var(--radius);
+}
+
+.history-session-row,
+.sched-row,
+.logs-file-row,
+.floormap-tabs {
+    border-radius: 16px;
+}
+
+.status-bar {
+    border-radius: 999px;
+    box-shadow: var(--highlight);
+}
+
+.info-card-label,
+.history-stat-label,
+.status-bar-label {
+    letter-spacing: 0.08em;
+}
+
+.info-card-value {
+    font-weight: 700;
+    letter-spacing: -0.02em;
+}
+
+/* Action bar: floating glass tiles, gradient primary */
+.action-btn {
+    border-radius: 24px;
+    background: var(--card-bg);
+    box-shadow: var(--shadow), var(--highlight);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    transition:
+        transform 0.12s,
+        box-shadow 0.2s;
+}
+
+.action-btn.primary,
+.floormap-btn.primary,
+.settings-save-btn:not(:disabled),
+.floormap-tab.active {
+    border-color: transparent;
+    background: var(--accent-grad);
+    color: #fff;
+    box-shadow:
+        0 10px 26px var(--accent-glow),
+        inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.floormap-tab.active {
+    box-shadow: 0 6px 16px var(--accent-glow);
+}
+
+.floormap-btn,
+.floormap-chip,
+.floormap-session,
+.history-import-btn,
+.history-pin-btn,
+.schedule-skip-btn {
+    border-radius: 14px;
+    transition:
+        transform 0.12s,
+        background 0.2s,
+        border-color 0.2s;
+}
+
+.floormap-btn:not(:disabled):active,
+.floormap-chip:active {
+    transform: scale(0.97);
+}
+
+.floormap-chip {
+    border-radius: 999px;
+}
+
+.floormap-progress,
+.floormap-progress-bar {
+    height: 8px;
+    border-radius: 4px;
+}
+
+.floormap-progress-bar {
+    background: linear-gradient(90deg, var(--green), var(--teal));
+    box-shadow: 0 0 12px rgba(61, 220, 132, 0.45);
+}
+
+/* Toggles: rounded track, accent when on */
+.settings-toggle {
+    border-radius: 999px;
+    border-color: var(--border);
+    background: var(--surface-raised);
+}
+
+.settings-toggle::after {
+    border-radius: 50%;
+    background: var(--text-dim);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.settings-toggle.on {
+    border-color: transparent;
+    background: var(--accent-grad);
+}
+
+.settings-toggle.on::after {
+    background: #fff;
+}
+
+.confirm-dialog {
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    box-shadow:
+        0 24px 60px rgba(0, 0, 0, 0.45),
+        var(--highlight);
+}
+
+:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.header h1 {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.header-hostname {
+    font-size: 0.68em;
+    font-weight: 500;
 }

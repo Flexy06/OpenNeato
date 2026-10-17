@@ -58,6 +58,7 @@ private:
     void registerMapRoutes();
     void registerWiFiRoutes();
     void registerGuidedRoutes();
+    void registerMapUpload(const char *path, bool field);
     static void sendGzipAsset(AsyncWebServerRequest *request, const uint8_t *data, size_t len, const char *contentType);
     static void sendError(AsyncWebServerRequest *request, int code, const String& msg);
     static void sendOk(AsyncWebServerRequest *request);

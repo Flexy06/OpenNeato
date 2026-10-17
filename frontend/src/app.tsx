@@ -17,8 +17,8 @@ import { SettingsView } from "./views/settings";
 
 type Theme = "system" | "dark" | "light";
 
-const THEME_DARK = "#161618";
-const THEME_LIGHT = "#ffffff";
+const THEME_DARK = "#0d0e13";
+const THEME_LIGHT = "#f4f5f9";
 
 function setThemeColor(color: string) {
     document.querySelector('meta[name="theme-color"]')?.setAttribute("content", color);
@@ -78,7 +78,13 @@ export function App() {
     }, [distanceUnit]);
 
     const state = usePolling<StateData>(api.getState, 2000);
-    const firmware = usePolling<FirmwareVersion>(api.getFirmwareVersion, 60000);
+    // Poll quickly until the robot is identified (after boot/OTA the first answer is
+    // usually "identifying" or a failed fetch), then once a minute.
+    const [firmwareFast, setFirmwareFast] = useState(true);
+    const firmware = usePolling<FirmwareVersion>(api.getFirmwareVersion, firmwareFast ? 3000 : 60000);
+    useEffect(() => {
+        setFirmwareFast(!firmware.data || firmware.data.identifying);
+    }, [firmware.data]);
 
     // --- Update check (browser-side, GitHub releases API) ---
     const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);

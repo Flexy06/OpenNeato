@@ -144,6 +144,9 @@ void CleaningHistory::startCollection(const String& uiState) {
 
     cleanMode = cleanModeFromState(uiState);
     sessionStartTime = systemManager.now();
+    scanRecording = scanArmed && cleanMode == "house";
+    scanArmed = false;
+    scanCount = 0;
 
     // Create session file: /history/<epoch>.jsonl
     activeFilePath = String(HISTORY_DIR) + "/" + String(static_cast<long>(sessionStartTime)) + ".jsonl";
@@ -168,6 +171,9 @@ void CleaningHistory::startCollection(const String& uiState) {
 }
 
 void CleaningHistory::stopCollection() {
+    if (scanRecording)
+        LOG("HIST", "Mapping run recorded %u LIDAR scans", static_cast<unsigned>(scanCount));
+    scanRecording = false;
     // Flush any buffered snapshots before writing summary
     flushWriteBuffer();
 
@@ -320,6 +326,8 @@ void CleaningHistory::writeSessionHeader() {
         fields.push_back({"time", String(static_cast<long>(sessionStartTime)), FIELD_INT});
     if (batteryStart >= 0)
         fields.push_back({"battery", String(batteryStart), FIELD_INT});
+    if (scanRecording)
+        fields.push_back({"scans", "true", FIELD_BOOL});
     String json = fieldsToJson(fields);
     pendingSessionJson = json;
     writeLine(json);
@@ -433,6 +441,9 @@ bool CleaningHistory::replayLine(const String& line) {
             batteryStart = battField->value.toInt();
         return true;
     }
+
+    if (typeField && typeField->value == "scan")
+        return false; // Mapping-run LIDAR scan, not a pose snapshot
 
     if (typeField && typeField->value == "recharge") {
         rechargeCount++;
@@ -764,7 +775,83 @@ void CleaningHistory::collectSnapshot() {
                 }
 
                 writeSnapshot(x, y, theta, time);
+                if (scanRecording && snapshotCount % HISTORY_SCAN_EVERY == 0) {
+                    fetchPending = true;
+                    collectScan(x, y, theta);
+                }
             });
+        });
+    });
+}
+
+static const char B64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+static String base64Encode(const uint8_t *data, size_t len) {
+    String out;
+    out.reserve((len + 2) / 3 * 4);
+    for (size_t i = 0; i < len; i += 3) {
+        uint32_t v = static_cast<uint32_t>(data[i]) << 16;
+        if (i + 1 < len)
+            v |= static_cast<uint32_t>(data[i + 1]) << 8;
+        if (i + 2 < len)
+            v |= data[i + 2];
+        out += B64[(v >> 18) & 63];
+        out += B64[(v >> 12) & 63];
+        out += i + 1 < len ? B64[(v >> 6) & 63] : '=';
+        out += i + 2 < len ? B64[v & 63] : '=';
+    }
+    return out;
+}
+
+// Mapping run: grab a LIDAR scan, then the pose again, and store the scan with
+// the averaged pose (the robot keeps moving while the ~5 KB response arrives).
+// Line format: {"type":"scan","x":m,"y":m,"t":deg,"d":"<base64 of 180 bins>"}
+void CleaningHistory::collectScan(float x0, float y0, float t0) {
+    neato.getLdsScan([this, x0, y0, t0](bool ok, const LdsScanData& scan) {
+        if (!ok || !collecting) {
+            fetchPending = false;
+            return;
+        }
+        uint8_t bins[HISTORY_SCAN_BINS];
+        const int per = 360 / HISTORY_SCAN_BINS;
+        for (int b = 0; b < HISTORY_SCAN_BINS; b++) {
+            int best = 0;
+            for (int k = 0; k < per; k++) {
+                const LdsScanPoint& p = scan.points[b * per + k];
+                if (p.errorCode != 0 || p.distMM < 120 || p.distMM > 255 * HISTORY_SCAN_UNIT_MM)
+                    continue;
+                if (best == 0 || p.distMM < best)
+                    best = p.distMM;
+            }
+            bins[b] = static_cast<uint8_t>((best + HISTORY_SCAN_UNIT_MM / 2) / HISTORY_SCAN_UNIT_MM);
+        }
+        String encoded = base64Encode(bins, HISTORY_SCAN_BINS);
+        neato.getRobotPos(true, [this, x0, y0, t0, encoded](bool posOk, const RobotPosData& pos) {
+            fetchPending = false;
+            if (!collecting)
+                return;
+            float x1 = x0;
+            float y1 = y0;
+            float t1 = t0;
+            float ts = 0.0f;
+            if (posOk)
+                parsePose(pos.raw, x1, y1, t1, ts);
+            // Discard if the robot turned a lot during the scan (smeared)
+            float dt = t1 - t0;
+            if (dt > 180.0f)
+                dt -= 360.0f;
+            if (dt < -180.0f)
+                dt += 360.0f;
+            if (fabsf(dt) > 25.0f)
+                return;
+            float tm = t0 + dt / 2.0f;
+            if (tm < 0.0f)
+                tm += 360.0f;
+            if (tm >= 360.0f)
+                tm -= 360.0f;
+            bufferLine("{\"type\":\"scan\",\"x\":" + String((x0 + x1) / 2.0f, 3) + ",\"y\":" +
+                       String((y0 + y1) / 2.0f, 3) + ",\"t\":" + String(tm, 1) + ",\"d\":\"" + encoded + "\"}");
+            scanCount++;
         });
     });
 }

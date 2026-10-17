@@ -76,4 +76,13 @@ export interface MapData {
     recharges: MapRechargePoint[];
     bounds: MapBounds | null;
     cellSize: number;
+    scans: MapScan[];
+}
+
+// Mapping-run LIDAR scan: robot SLAM pose (m, deg) + 180 bins of 2° in 20 mm units (0 = no return)
+export interface MapScan {
+    x: number;
+    y: number;
+    t: number;
+    bins: Uint8Array;
 }

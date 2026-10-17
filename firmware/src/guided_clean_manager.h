@@ -109,8 +109,47 @@ private:
     time_t startedEpoch = 0;
     unsigned long finishedMs = 0;
 
+    // Coarse planning grid: free = floor the robot covered during the recording,
+    // minus (inflated) no-go zones. Obstacles found during the run are checked
+    // on top at planning time.
+    struct PlanGrid {
+        int originX = 0;
+        int originY = 0;
+        int cell = GUIDED_PLAN_CELL_MM;
+        int w = 0;
+        int h = 0;
+        std::vector<uint8_t> free;
+
+        bool inside(int cx, int cy) const { return cx >= 0 && cy >= 0 && cx < w && cy < h; }
+        int index(int cx, int cy) const { return cy * w + cx; }
+        void toCell(float x, float y, int& cx, int& cy) const;
+        float centerX(int cx) const { return static_cast<float>(originX + cx * cell + cell / 2); }
+        float centerY(int cy) const { return static_cast<float>(originY + cy * cell + cell / 2); }
+        void clear();
+    };
+
+    // A cleaning run: consecutive recorded points inside the selected rooms
+    struct Run {
+        uint16_t first = 0; // Index into cleanPts
+        uint16_t last = 0;
+        bool done = false;
+    };
+
     // -- Plan -----------------------------------------------------------------
+    // `route` is the current leg: either a planned transit path (to the start of
+    // the next run, or home) or the points of one cleaning run.
     std::vector<Waypoint> route;
+    std::vector<Waypoint> cleanPts;
+    std::vector<Run> runs;
+    int curRun = -1;
+    bool curReversed = false;
+    bool legTransit = false;
+    float legGoalX = 0.0f;
+    float legGoalY = 0.0f;
+    int legReplans = 0;
+    bool fallbackHome = false; // Returning along breadcrumbs because planning failed
+    std::vector<MapPoint> crumbs; // Sparse trail of reached positions (fallback way home)
+    PlanGrid grid;
     std::vector<MapZone> nogos;
     CoverGrid cover;
     size_t routeIdx = 0; // Last reached (or skipped) waypoint
@@ -120,9 +159,11 @@ private:
     int obstacleStreak = 0;
     int obstacleTotal = 0;
     bool fallbackDock = false;
-    // 0 = face away from dock, 3 = scan matching, 4 = re-approach, 5 = start back-in,
-    // 1 = backing in, 2 = verifying contacts
+    // Docking stages (see step()): staging-point alignment → scan match → reverse
+    // along the dock axis → final alignment + scan match → straight back-in → verify
     uint8_t dockStage = 0;
+    int dockAttempts = 0;
+    bool dockIcpNearDone = false;
     unsigned long dockCheckAtMs = 0;
     uint32_t runGen = 0; // Incremented per run/finish; stale serial callbacks compare against it
 
@@ -197,7 +238,16 @@ private:
     int16_t refScan[360] = {}; // Reference scan on the dock (mm per degree, 0 = invalid)
     bool refScanValid = false;
     int dockIcpTries = 0;
-    void requestIcpScan();
+    void requestIcpScan(uint8_t resumeStage);
+
+    // -- LIDAR localization against the mapping-run field ----------------------------
+    LocField field;
+    bool locInit = false;
+    int locFixes = 0;
+    float locScore = 0.0f;
+    void requestLocScan(int radiusMM, int angleDeg, uint8_t resumeStage);
+    // Correlative scan match around the current pose; updates the pose on success
+    bool matchField(const LdsScanData& scan, int radiusMM, int angleDeg);
     bool matchReference(const LdsScanData& scan, float& corrX, float& corrY, float& corrT) const;
     void applyCompass(const LdsScanData& scan, bool reference);
     static bool dominantWallAngle(const LdsScanData& scan, float& phi, float& conf);
@@ -216,6 +266,22 @@ private:
     bool nearNogo(float x, float y) const;
     bool nearObstacle(float x, float y) const;
     void markReached(size_t idx);
+    // -- Legs / planning ------------------------------------------------------------
+    void buildGrid();
+    bool cellBlocked(int cx, int cy) const;
+    bool gridLineFree(float ax, float ay, float bx, float by) const;
+    bool planPath(float gx, float gy, std::vector<Waypoint>& out) const;
+    bool planPathOnce(float gx, float gy, std::vector<Waypoint>& out) const;
+    mutable bool planIgnoreObstacles = false;
+    void setLeg(std::vector<Waypoint>& pts, bool transit);
+    void startNextLeg();
+    void loadRunLeg();
+    void skipCurrentRun(const char *why);
+    void onLegComplete();
+    void onTransitBlocked();
+    void pushCrumb();
+    void fallbackReturn();
+    void stepDocking();
     void beginReturn(const String& reason);
     void beginDocking();
     void checkDocked();

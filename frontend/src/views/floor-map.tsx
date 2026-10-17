@@ -10,7 +10,6 @@ import {
     type FloorMap,
     type FloorMapZone,
     floorMapBounds,
-    floorMapFromSession,
     type MapVertex,
     nextZoneId,
     parseFloorMap,
@@ -20,13 +19,15 @@ import {
     serializeFloorMap,
     MAX_VERTICES,
 } from "../floor-map";
+import { pinSession } from "../floor-map-pin";
 import { useDirtyGuard } from "../hooks/use-dirty-guard";
+import { type LocMap, parseLocMap } from "../loc-map";
 import { usePolling } from "../hooks/use-polling";
 import { T, useI18n } from "../i18n";
 import type { GuidedStatus, HistoryFileInfo, StateData } from "../types";
 import { normalizeError } from "../utils";
 import { fitView, hitVertex, type MapView, renderFloorMap, type Screen } from "./floor-map/canvas";
-import { CleanPanel, EditPanel, type EditTarget, SessionPicker } from "./floor-map/panels";
+import { CleanPanel, EditPanel, type EditTarget, MappingCard, SessionPicker } from "./floor-map/panels";
 import { useEditorGestures } from "./floor-map/use-editor-gestures";
 
 interface FloorMapViewProps {
@@ -87,6 +88,8 @@ export function FloorMapView({ state, robotReady }: FloorMapViewProps) {
     const [confirm, setConfirm] = useState<"deleteZone" | "deleteMap" | "rename" | null>(null);
     const [pendingAction, setPendingAction] = useState(false);
     const [trail, setTrail] = useState<MapVertex[]>([]);
+    const [loc, setLoc] = useState<LocMap | null>(null);
+    const [mappingStarted, setMappingStarted] = useState(false);
 
     const doc = useMemo(() => (map ? serializeFloorMap(map) : null), [map]);
     const dirty = map !== null && doc !== savedDoc;
@@ -103,6 +106,9 @@ export function FloorMapView({ state, robotReady }: FloorMapViewProps) {
             })
             .catch((e: unknown) => errorStack.push(normalizeError(e, "Failed to load floor map")))
             .finally(() => setLoading(false));
+        api.getLocField()
+            .then((buf) => setLoc(buf ? parseLocMap(buf) : null))
+            .catch(() => setLoc(null));
     }, [errorStack]);
 
     useEffect(() => {
@@ -165,12 +171,12 @@ export function FloorMapView({ state, robotReady }: FloorMapViewProps) {
 
     const fit = useCallback(() => {
         if (!map) return;
-        const box = floorMapBounds(map);
+        const box = floorMapBounds(map, loc);
         if (!box) return;
         const v = fitView(box, screen(), rotation);
         viewRef.current = v;
         setView(v);
-    }, [map, rotation]);
+    }, [map, rotation, loc]);
 
     // Fit once when a map first appears (and on rotation changes)
     const fittedFor = useRef<string | null>(null);
@@ -203,10 +209,11 @@ export function FloorMapView({ state, robotReady }: FloorMapViewProps) {
                         : null,
                 trail,
                 showPath: tab === "edit",
+                loc,
             },
             labelFor,
         );
-    }, [map, tab, selection, editTarget, activeVertex, draft, status, trail, labelFor]);
+    }, [map, tab, selection, editTarget, activeVertex, draft, status, trail, labelFor, loc]);
 
     useEffect(() => {
         const id = requestAnimationFrame(redraw);
@@ -333,11 +340,11 @@ export function FloorMapView({ state, robotReady }: FloorMapViewProps) {
             try {
                 const sessions = await api.getHistorySession(file.name);
                 if (sessions.length === 0 || sessions[0].path.length < 2) throw new Error(t("Session has no path"));
-                const next = floorMapFromSession(file.name, sessions[0], map);
-                const nextDoc = serializeFloorMap(next);
-                await api.saveFloorMap(nextDoc);
+                const result = await pinSession(file.name, sessions[0], map);
+                const next = result.map;
                 setMap(next);
-                setSavedDoc(nextDoc);
+                setSavedDoc(result.doc);
+                if (result.loc) setLoc(result.loc);
                 setPicking(false);
                 fittedFor.current = null;
                 if (next.rooms.length === 0) setTab("edit");
@@ -350,11 +357,21 @@ export function FloorMapView({ state, robotReady }: FloorMapViewProps) {
         [map, errorStack, t],
     );
 
+    const startMapping = useCallback(async () => {
+        try {
+            await api.startMappingRun();
+            setMappingStarted(true);
+        } catch (e: unknown) {
+            errorStack.push(normalizeError(e, "Action failed"));
+        }
+    }, [errorStack]);
+
     const deleteMap = useCallback(async () => {
         setConfirm(null);
         try {
             await api.deleteFloorMap();
             setMap(null);
+            setLoc(null);
             setSavedDoc(null);
             setPicking(true);
             setEditTarget(null);
@@ -485,6 +502,7 @@ export function FloorMapView({ state, robotReady }: FloorMapViewProps) {
                                 rooms and no-go zones on, and the route the robot follows when it cleans single rooms.
                             </T>
                         </p>
+                        <MappingCard started={mappingStarted} robotIdle={robotIdle} onStart={startMapping} />
                         <SessionPicker
                             current={map?.source ?? null}
                             busy={pinning}

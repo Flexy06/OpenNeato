@@ -525,6 +525,41 @@ void WebServer::registerWiFiRoutes() {
 // -- Floor map + guided clean ---------------------------------------------------
 
 void WebServer::registerGuidedRoutes() {
+    // Sub-paths first: ESPAsyncWebServer also matches "/api/floormap" for
+    // "/api/floormap/<anything>", so the more specific routes must win.
+    // GET /api/floormap/field — localization field (binary, see floor_map.h)
+    loggedRoute("/api/floormap/field", HTTP_GET, [this](AsyncWebServerRequest *request) -> int {
+        auto reader = floorMap.readField();
+        if (!reader) {
+            sendError(request, 404, "no localization field");
+            return 404;
+        }
+        AsyncWebServerResponse *response = request->beginChunkedResponse(
+                "application/octet-stream",
+                [reader](uint8_t *buffer, size_t maxLen, size_t) -> size_t { return reader->read(buffer, maxLen); });
+        request->send(response);
+        return 200;
+    });
+
+    // PUT /api/floormap/field — replace the localization field
+    registerMapUpload("/api/floormap/field", true);
+
+    // POST /api/floormap/record — mapping run: house clean that records LIDAR scans
+    loggedRoute("/api/floormap/record", HTTP_POST, [this](AsyncWebServerRequest *request) -> int {
+        if (guidedMgr.isActive() || manualMgr.isActive()) {
+            sendError(request, 409, "robot is busy");
+            return 409;
+        }
+        historyMgr.armScanRecording();
+        if (!neato.clean("house", nullptr)) {
+            historyMgr.disarmScanRecording();
+            sendError(request, 503, "robot not ready");
+            return 503;
+        }
+        sendOk(request);
+        return 200;
+    });
+
     // GET /api/floormap — stored floor map document (text/plain, OFM1 format)
     loggedRoute("/api/floormap", HTTP_GET, [this](AsyncWebServerRequest *request) -> int {
         auto reader = floorMap.read();
@@ -543,42 +578,7 @@ void WebServer::registerGuidedRoutes() {
     // PUT /api/floormap — replace the floor map. The body can span several
     // chunks (up to FLOORMAP_MAX_BYTES), so it is streamed to a temp file and
     // validated before it replaces the current map.
-    server.on(
-            "/api/floormap", HTTP_PUT,
-            [this](AsyncWebServerRequest *request) {
-                // Body callback already answered; this only fires for empty bodies
-                if (request->contentLength() == 0) {
-                    logger.logRequest(HTTP_PUT, "/api/floormap", 400, 0);
-                    sendError(request, 400, "empty body");
-                }
-            },
-            nullptr,
-            [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-                lastApiActivity = millis();
-                if (index == 0 && !floorMap.beginUpload(total)) {
-                    int code = floorMap.getUploadError() == "map too large" ? 413 : 500;
-                    logger.logRequest(HTTP_PUT, "/api/floormap", code, 0);
-                    sendError(request, code, floorMap.getUploadError());
-                    return;
-                }
-                if (!floorMap.isUploading())
-                    return; // Rejected earlier in this request — already answered
-                if (!floorMap.writeChunk(data, len)) {
-                    int code = floorMap.getUploadError() == "map too large" ? 413 : 500;
-                    logger.logRequest(HTTP_PUT, "/api/floormap", code, 0);
-                    sendError(request, code, floorMap.getUploadError());
-                    return;
-                }
-                if (index + len >= total) {
-                    if (floorMap.endUpload()) {
-                        logger.logRequest(HTTP_PUT, "/api/floormap", 200, 0);
-                        sendOk(request);
-                    } else {
-                        logger.logRequest(HTTP_PUT, "/api/floormap", 400, 0);
-                        sendError(request, 400, floorMap.getUploadError());
-                    }
-                }
-            });
+    registerMapUpload("/api/floormap", false);
 
     // DELETE /api/floormap — remove the floor map
     loggedRoute("/api/floormap", HTTP_DELETE, [this](AsyncWebServerRequest *request) -> int {
@@ -620,4 +620,43 @@ void WebServer::registerGuidedRoutes() {
     });
 
     LOG("WEB", "Guided clean routes registered");
+}
+
+void WebServer::registerMapUpload(const char *path, bool field) {
+    server.on(
+            path, HTTP_PUT,
+            [this, path](AsyncWebServerRequest *request) {
+                // Body callback already answered; this only fires for empty bodies
+                if (request->contentLength() == 0) {
+                    logger.logRequest(HTTP_PUT, path, 400, 0);
+                    sendError(request, 400, "empty body");
+                }
+            },
+            nullptr,
+            [this, path, field](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+                lastApiActivity = millis();
+                if (index == 0 && !floorMap.beginUpload(total, field)) {
+                    int code = floorMap.getUploadError() == "map too large" ? 413 : 500;
+                    logger.logRequest(HTTP_PUT, path, code, 0);
+                    sendError(request, code, floorMap.getUploadError());
+                    return;
+                }
+                if (!floorMap.isUploading())
+                    return; // Rejected earlier in this request — already answered
+                if (!floorMap.writeChunk(data, len)) {
+                    int code = floorMap.getUploadError() == "map too large" ? 413 : 500;
+                    logger.logRequest(HTTP_PUT, path, code, 0);
+                    sendError(request, code, floorMap.getUploadError());
+                    return;
+                }
+                if (index + len >= total) {
+                    if (floorMap.endUpload()) {
+                        logger.logRequest(HTTP_PUT, path, 200, 0);
+                        sendOk(request);
+                    } else {
+                        logger.logRequest(HTTP_PUT, path, 400, 0);
+                        sendError(request, 400, floorMap.getUploadError());
+                    }
+                }
+            });
 }

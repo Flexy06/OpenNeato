@@ -485,5 +485,14 @@
   "no rooms defined on the map": "haritada oda tanımlı değil",
   "the dock lies inside a no-go zone": "şarj istasyonu yasak bölgede",
   "guided clean is not running": "oda temizliği çalışmıyor",
-  "robot not responding": "robot yanıt vermiyor"
+  "robot not responding": "robot yanıt vermiyor",
+  "LIDAR map": "LIDAR haritası",
+  "Map lock {score}%": "Harita eşleşmesi %{score}",
+  "Record a LIDAR map": "LIDAR haritası kaydet",
+  "For reliable room cleaning the robot needs a wall map: start a mapping run from the dock. It is a normal house clean that also records LIDAR scans. When it is back on the dock, pick it below.": "Güvenilir oda temizliği için robotun bir duvar haritasına ihtiyacı var: istasyondan bir haritalama turu başlatın. Bu, LIDAR taramalarını da kaydeden normal bir ev temizliğidir. Robot istasyona döndüğünde aşağıdan seçin.",
+  "Mapping run started. Come back when the robot has returned to the dock.": "Haritalama turu başladı. Robot istasyona döndüğünde geri gelin.",
+  "Start mapping run": "Haritalamayı başlat",
+  "robot is busy": "robot meşgul",
+  "no localization field": "konumlama alanı yok",
+  "invalid localization field": "geçersiz konumlama alanı"
 }

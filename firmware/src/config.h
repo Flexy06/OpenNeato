@@ -199,12 +199,18 @@ enum CommandStatus {
 #define HISTORY_MAX_FILES 20 // Maximum number of archived session files to keep
 #define HISTORY_AREA_CELL_M 0.5f // Coarse grid cell size in meters for visited-area estimation
 #define HISTORY_MIN_SNAPSHOTS 3 // Discard sessions with fewer snapshots (too short to render a useful map)
-#define HISTORY_IMPORT_MAX_BYTES 262144 // 256 KB max import file size (2h clean at 2s intervals ~ 180KB)
+#define HISTORY_IMPORT_MAX_BYTES 524288 // 512 KB max import file size (mapping runs carry LIDAR scans)
+#define HISTORY_SCAN_EVERY 3 // Mapping run: record a LIDAR scan every Nth pose snapshot (~6s)
+#define HISTORY_SCAN_BINS 180 // Scans are stored as 2° bins ...
+#define HISTORY_SCAN_UNIT_MM 20 // ... of 20 mm steps (1 byte, 0 = no return, max 5.1 m)
 
 // Floor map (pinned cleaning session + rooms + no-go zones) — see floor_map.h
 #define FLOORMAP_DIR "/map"
 #define FLOORMAP_FILE "/map/floor.txt"
 #define FLOORMAP_TMP_FILE "/map/floor.tmp"
+#define FLOORMAP_FIELD_FILE "/map/field.bin"
+#define FLOORMAP_FIELD_TMP_FILE "/map/field.tmp"
+#define FLOORMAP_FIELD_MAX_BYTES 98304 // Likelihood field upload cap (e.g. 300x300 cells @ 5 cm + header)
 #define FLOORMAP_MAX_BYTES 65536 // 64 KB upload cap (3000 path points ~ 36 KB as text)
 #define FLOORMAP_MAX_PATH_POINTS 3000 // ~1.6h of recorded snapshots at 2s intervals
 #define FLOORMAP_MAX_ZONES 16 // Max rooms and max no-go zones (each)
@@ -238,8 +244,10 @@ enum CommandStatus {
 #define GUIDED_MIN_BATTERY_PCT 20 // Return to dock below this charge
 #define GUIDED_BATTERY_POLL_MS 60000 // Battery check cadence while running
 #define GUIDED_MAX_RUNTIME_MS 7200000UL // Hard limit (2h) — return home after this
-#define GUIDED_DOCK_APPROACH_MM 450 // Approach point in front of the dock before backing in
-#define GUIDED_DOCK_BACKIN_MM 480 // Reverse distance from the approach point onto the dock contacts
+#define GUIDED_DOCK_STAGING_MM 900 // Staging point on the dock axis: arrive here, align, scan-match
+#define GUIDED_DOCK_PREBACK_MM 300 // Last stop on the dock axis before the final straight back-in
+#define GUIDED_DOCK_LATERAL_TOL_MM 50 // Max sideways offset from the dock axis for the final back-in
+#define GUIDED_DOCK_ATTEMPTS 2 // Full approach attempts before handing over to the robot's own docking
 #define GUIDED_OBSTACLE_RADIUS_MM 150 // Remembered obstacle footprint (bump/stall) placed ahead of the robot
 #define GUIDED_CLIFF_RADIUS_MM 250 // Remembered cliff footprint
 #define GUIDED_MAX_OBSTACLES 24 // Obstacle memory (oldest dropped first)
@@ -250,10 +258,21 @@ enum CommandStatus {
 #define GUIDED_COMPASS_EVERY_DEG 75.0f // ... or this much accumulated turning
 #define GUIDED_COMPASS_MIN_CONF 0.35f // Min alignment strength (0..1) of the wall direction histogram
 #define GUIDED_COMPASS_MAX_FIX_DEG 20.0f // Ignore corrections larger than this (clutter / non-rectangular room)
+// LIDAR localization against the mapping-run field (floor_map.h LocField)
+#define GUIDED_LOC_EVERY_MM 400 // Re-localize after this much travel ...
+#define GUIDED_LOC_EVERY_DEG 30.0f // ... or this much turning
+#define GUIDED_LOC_RADIUS_MM 300 // Search window around the odometry pose
+#define GUIDED_LOC_ANGLE_DEG 10 // Heading search window (±)
+#define GUIDED_LOC_START_RADIUS_MM 500 // Wider search for the first fix on the dock
+#define GUIDED_LOC_START_ANGLE_DEG 25
+#define GUIDED_LOC_MIN_SCORE 0.30f // Min normalized match score (0..1) to accept a fix
 // Dock homing — ICP scan match against the reference scan taken on the dock
-#define GUIDED_ICP_MAX_TRIES 3 // Re-approach attempts before backing in anyway
-#define GUIDED_ICP_ACCEPT_MM 40 // Back in once the approach point is within this distance
 #define GUIDED_ICP_MAX_CORR_MM 900 // Reject matches that move the pose further than this
+// Path planning — BFS over a coarse grid of floor the recording covered
+#define GUIDED_PLAN_CELL_MM 200 // Planning grid cell (doubled automatically for large homes)
+#define GUIDED_PLAN_MAX_CELLS 120 // Max cells per axis (dist map ≤ 29 KB while planning)
+#define GUIDED_MAX_REPLANS 4 // Re-plans of one transit leg after obstacles before giving up on it
+#define GUIDED_RUN_GAP_MM 1200 // Recorded points further apart than this start a new cleaning run
 
 // Task Watchdog Timer (TWDT) — hardware watchdog that resets the ESP32 if
 // loop() stops running (deadlock, infinite loop, blocking I/O). The main task

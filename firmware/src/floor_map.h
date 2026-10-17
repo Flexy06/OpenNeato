@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <SPIFFS.h>
+#include <cmath>
 #include <memory>
 #include <vector>
 #include "config.h"
@@ -40,6 +41,35 @@ struct MapZone {
     std::vector<MapPoint> poly;
 };
 
+// Localization map ("likelihood field") built by the frontend from a mapping
+// run: one byte per cell, 255 on walls/furniture seen by the LIDAR, falling
+// off with distance. Scan matching scores a pose by summing the field under
+// the scan points. Binary layout (little endian):
+//   "OFL1" | int32 originX mm | int32 originY mm | uint16 cell mm | uint16 w | uint16 h
+//   | int8 lidarSign (+1 CCW / -1 CW) | int8 reserved | int16 lidarAngleOffset (0.1°)
+//   | int16 lidarOffsetX mm | int16 reserved | w*h bytes (row-major, y up)
+struct LocField {
+    int originX = 0;
+    int originY = 0;
+    int cell = 50;
+    int w = 0;
+    int h = 0;
+    int lidarSign = 1;
+    float lidarAngleOffsetRad = 0.0f;
+    int lidarOffsetX = 0;
+    std::vector<uint8_t> data;
+
+    bool valid() const { return w > 0 && h > 0 && data.size() == static_cast<size_t>(w) * static_cast<size_t>(h); }
+    // Field value at a world point (0 outside)
+    uint8_t at(float x, float y) const {
+        int cx = static_cast<int>(floorf((x - static_cast<float>(originX)) / static_cast<float>(cell)));
+        int cy = static_cast<int>(floorf((y - static_cast<float>(originY)) / static_cast<float>(cell)));
+        if (cx < 0 || cy < 0 || cx >= w || cy >= h)
+            return 0;
+        return data[static_cast<size_t>(cy) * static_cast<size_t>(w) + static_cast<size_t>(cx)];
+    }
+};
+
 struct FloorMapData {
     String source;
     std::vector<MapPoint> path;
@@ -71,6 +101,7 @@ public:
     void begin();
 
     bool hasMap() const;
+    bool hasField() const;
     size_t fileSize() const;
 
     // Streaming reader for GET /api/floormap (nullptr if no map stored)
@@ -83,7 +114,8 @@ public:
     // beginUpload() opens a temp file; writeChunk() appends; endUpload()
     // validates the full document by parsing it and atomically replaces the
     // stored map. Any failure leaves the previous map untouched.
-    bool beginUpload(size_t totalBytes);
+    // target: false = map document, true = localization field
+    bool beginUpload(size_t totalBytes, bool field = false);
     bool writeChunk(const uint8_t *data, size_t len);
     bool endUpload();
     void abortUpload();
@@ -93,10 +125,17 @@ public:
     // Parse the stored map into memory. Returns false (with `err`) if missing or invalid.
     bool load(FloorMapData& out, String& err) const;
 
+    // Load the localization field (false if none / invalid)
+    bool loadField(LocField& out) const;
+
+    // Streaming reader for GET /api/floormap/field (nullptr if none)
+    std::shared_ptr<LogReader> readField();
+
 private:
     DataLogger& dataLogger;
 
     bool uploading = false;
+    bool uploadingField = false;
     File uploadFile;
     size_t uploadReceived = 0;
     String uploadError;

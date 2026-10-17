@@ -21,6 +21,9 @@ The fake `NeatoSerial` simulates:
 - a ray-cast LIDAR (CCW or CW angle convention, optional mounting offset),
 - battery drain.
 
+Before each scenario a likelihood field is rasterized from the world walls and
+uploaded, as the frontend does after a mapping run (unless the scenario disables it).
+
 Scenarios (two rooms joined by a door, one no-go zone in room 2):
 
 | Scenario                  | Checks                                                  |
@@ -33,6 +36,9 @@ Scenarios (two rooms joined by a door, one no-go zone in room 2):
 | clockwise LIDAR           | compass direction auto-calibration                      |
 | no compass, low drift     | odometry-only fallback                                  |
 | lidar offset + furniture  | compass + dock ICP with an off-centre turret            |
+| room 1 only               | recording detours via room 2 — robot must not follow it |
+| heavy drift with map      | 2% wheel slip + wrong wheel base, corrected by map matching |
+| no map field              | compass fallback without a localization field           |
 
 The model is deliberately simple (no wheel inertia, perfect encoders apart from
 slip, no carpet). Passing it means the control logic is consistent; it does not

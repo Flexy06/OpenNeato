@@ -485,5 +485,14 @@
   "no rooms defined on the map": "auf der Karte sind keine Räume eingezeichnet",
   "the dock lies inside a no-go zone": "die Ladestation liegt in einer Sperrzone",
   "guided clean is not running": "Raumreinigung läuft nicht",
-  "robot not responding": "Roboter antwortet nicht"
+  "robot not responding": "Roboter antwortet nicht",
+  "LIDAR map": "LIDAR-Karte",
+  "Map lock {score}%": "Kartenabgleich {score}%",
+  "Record a LIDAR map": "LIDAR-Karte aufnehmen",
+  "For reliable room cleaning the robot needs a wall map: start a mapping run from the dock. It is a normal house clean that also records LIDAR scans. When it is back on the dock, pick it below.": "Für zuverlässige Raumreinigung braucht der Roboter eine Wandkarte: Starte eine Kartierungsfahrt von der Ladestation. Das ist eine normale Hausreinigung, bei der zusätzlich LIDAR-Scans aufgezeichnet werden. Wenn er zurück auf der Station ist, wähle sie unten aus.",
+  "Mapping run started. Come back when the robot has returned to the dock.": "Kartierungsfahrt gestartet. Komm zurück, wenn der Roboter wieder an der Station ist.",
+  "Start mapping run": "Kartierungsfahrt starten",
+  "robot is busy": "Roboter ist beschäftigt",
+  "no localization field": "kein Lokalisierungsfeld",
+  "invalid localization field": "ungültiges Lokalisierungsfeld"
 }
