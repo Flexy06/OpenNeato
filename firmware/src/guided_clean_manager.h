@@ -247,9 +247,19 @@ private:
     // -- LIDAR localization against the mapping-run field ----------------------------
     LocField field;
     bool locInit = false;
+    bool bootChecked = false;
     int locFixes = 0;
     float locScore = 0.0f;
     void requestLocScan(int radiusMM, int angleDeg, uint8_t resumeStage);
+    // Deferred scan processing (see fetchScan): keeps big buffers off the loop stack
+    LdsScanData scanBuf;
+    bool scanJobOk = false;
+    std::function<void(bool, const LdsScanData&)> scanJob;
+    void fetchScan(std::function<void(bool, const LdsScanData&)> handler);
+    float mfPx[180] = {};
+    float mfPy[180] = {};
+    int mfBx[180] = {};
+    int mfBy[180] = {};
     // Correlative scan match around the current pose; updates the pose on success
     bool matchField(const LdsScanData& scan, int radiusMM, int angleDeg);
     bool matchReference(const LdsScanData& scan, float& corrX, float& corrY, float& corrT) const;

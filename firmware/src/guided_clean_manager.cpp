@@ -763,6 +763,7 @@ String GuidedCleanManager::command(const String& action, const String& rooms) {
             field = LocField();
 
         runGen++;
+        scanJob = nullptr;
         phase = Phase::Starting;
         lastError = "";
         roomsLabel = rooms;
@@ -806,6 +807,7 @@ String GuidedCleanManager::command(const String& action, const String& rooms) {
                         {"nogos", String(static_cast<unsigned>(nogos.size())), FIELD_INT},
                         {"runs", String(static_cast<unsigned>(runs.size())), FIELD_INT},
                         {"clean", String(cleanTotal), FIELD_INT}});
+        traceFlush(); // Evidence even if the ESP32 dies during the run
         beginStart();
         return "";
     }
@@ -904,8 +906,30 @@ void GuidedCleanManager::beginStart() {
 // -- Main loop ----------------------------------------------------------------------
 
 void GuidedCleanManager::tick() {
+    // Once after boot: if the ESP32 restarted during a guided run (crash, power
+    // loss, OTA), the robot is still in TestMode with the LIDAR spinning and
+    // ignores its own buttons/schedule. Release it.
+    if (!bootChecked && phase == Phase::Idle && serial.hasSKey() && millis() > 5000) {
+        bootChecked = true;
+        serial.getState([this](bool ok, const RobotState& st) {
+            if (!ok || st.uiState.indexOf("TESTMODE") < 0 || manual.isActive() || isActive())
+                return;
+            LOG("GUIDED", "Robot still in TestMode after an ESP32 restart — leaving TestMode");
+            serial.setLdsRotation(false, [this](bool) { serial.testMode(false); });
+        });
+    }
+
     if (!isActive() || phase == Phase::Starting || phase == Phase::Finishing)
         return;
+
+    // Scan results are processed here, not inside the serial callback chain
+    // (shallow stack; see fetchScan)
+    if (scanJob) {
+        auto job = std::move(scanJob);
+        scanJob = nullptr;
+        job(scanJobOk, scanBuf);
+        return;
+    }
 
     // Sensor polling runs continuously while active (odometry + safety)
     if (!pollPending && pollTicker.elapsed(GUIDED_POLL_MS) && serial.queueDepth() <= NEATO_QUEUE_MAX_SIZE / 2)
@@ -1565,6 +1589,7 @@ void GuidedCleanManager::checkDocked() {
 void GuidedCleanManager::finish(Phase result, const String& reason) {
     Phase from = phase;
     runGen++; // Invalidate all in-flight callbacks of this run
+    scanJob = nullptr;
     uint32_t gen = runGen;
     seg = SegKind::None;
     segStopping = false;
@@ -1678,7 +1703,7 @@ void GuidedCleanManager::requestScan(bool reference) {
     uint32_t gen = runGen;
     waitingCmd = true;
     lastScanMs = millis();
-    serial.getLdsScan([this, gen, reference](bool ok, const LdsScanData& scan) {
+    fetchScan([this, gen, reference](bool ok, const LdsScanData& scan) {
         if (gen != runGen)
             return;
         waitingCmd = false;
@@ -1757,7 +1782,7 @@ void GuidedCleanManager::requestLocScan(int radiusMM, int angleDeg, uint8_t resu
     uint32_t gen = runGen;
     waitingCmd = true;
     lastScanMs = millis();
-    serial.getLdsScan([this, gen, radiusMM, angleDeg, resumeStage](bool ok, const LdsScanData& scan) {
+    fetchScan([this, gen, radiusMM, angleDeg, resumeStage](bool ok, const LdsScanData& scan) {
         if (gen != runGen)
             return;
         waitingCmd = false;
@@ -1776,8 +1801,9 @@ void GuidedCleanManager::requestLocScan(int radiusMM, int angleDeg, uint8_t resu
 // in the coarse stage keep this to a few ms on the ESP32.
 bool GuidedCleanManager::matchField(const LdsScanData& scan, int radiusMM, int angleDeg) {
     // Scan points in the robot frame (LIDAR mounting from the map calibration)
-    float px[180];
-    float py[180];
+    // Scratch buffers are members: this runs on the 8 KB loop stack
+    float *px = mfPx;
+    float *py = mfPy;
     int n = 0;
     auto sgn = static_cast<float>(field.lidarSign);
     for (int i = 0; i < 360 && n < 180; i += 2) {
@@ -1800,8 +1826,8 @@ bool GuidedCleanManager::matchField(const LdsScanData& scan, int radiusMM, int a
     float bestT = poseTheta;
     float bestX = poseX;
     float bestY = poseY;
-    int bx[180];
-    int by[180];
+    int *bx = mfBx;
+    int *by = mfBy;
     for (int da = -angleDeg; da <= angleDeg; da += 2) {
         float th = poseTheta + static_cast<float>(da) * DEG;
         float c = cosf(th);
@@ -1924,7 +1950,7 @@ void GuidedCleanManager::requestIcpScan(uint8_t resumeStage) {
     waitingCmd = true;
     dockStage = 3;
     lastScanMs = millis();
-    serial.getLdsScan([this, gen, resumeStage](bool ok, const LdsScanData& scan) {
+    fetchScan([this, gen, resumeStage](bool ok, const LdsScanData& scan) {
         if (gen != runGen)
             return;
         waitingCmd = false;
@@ -2185,4 +2211,19 @@ void GuidedCleanManager::traceFlush() {
 
 bool GuidedCleanManager::hasTrace() const {
     return SPIFFS.exists(GUIDED_TRACE_FILE);
+}
+
+// GetLDSScan with deferred processing: the result is copied into scanBuf and the
+// handler runs from tick(). Matching inside the serial callback chain sat on top
+// of the ~6 KB parse frame and overflowed the 8 KB loop stack on the ESP32.
+void GuidedCleanManager::fetchScan(std::function<void(bool, const LdsScanData&)> handler) {
+    uint32_t gen = runGen;
+    serial.getLdsScan([this, gen, handler](bool ok, const LdsScanData& scan) {
+        if (gen != runGen)
+            return;
+        if (ok)
+            scanBuf = scan; // Trivially copyable: in-place copy, no stack temporary
+        scanJobOk = ok;
+        scanJob = handler;
+    });
 }

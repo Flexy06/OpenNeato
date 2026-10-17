@@ -2,6 +2,7 @@
 #include "config.h"
 #include "json_fields.h"
 #include <climits>
+#include <memory>
 
 // -- Lifecycle ---------------------------------------------------------------
 
@@ -620,11 +621,13 @@ void NeatoSerial::fetchErrClear(std::function<void(bool, const ErrorData&)> call
 
 void NeatoSerial::fetchLdsScan(std::function<void(bool, const LdsScanData&)> callback) {
     enqueue(CMD_GET_LDS_SCAN, [callback](bool ok, const String& raw) {
-        LdsScanData data;
+        // ~5.8 KB: parse on the heap, not on the 8 KB loop stack (the callback
+        // chain below runs on top of this frame)
+        std::unique_ptr<LdsScanData> data(new LdsScanData());
         if (ok)
-            ok = parseLdsScanData(raw, data);
+            ok = parseLdsScanData(raw, *data);
         if (callback)
-            callback(ok, data);
+            callback(ok, *data);
     });
 }
 

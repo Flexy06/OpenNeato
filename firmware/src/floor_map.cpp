@@ -137,6 +137,14 @@ static bool parseField(File& f, LocField& out) {
     size_t n = static_cast<size_t>(out.w) * static_cast<size_t>(out.h);
     if (out.cell < 10 || out.w == 0 || out.h == 0 || n + FIELD_HEADER > FLOORMAP_FIELD_MAX_BYTES)
         return false;
+#if defined(ARDUINO_ARCH_ESP32)
+    // One contiguous block; refuse instead of crashing on a fragmented heap
+    if (ESP.getMaxAllocHeap() < n + 16384) {
+        LOG("FMAP", "Localization field (%u bytes) does not fit in heap (max block %u)", static_cast<unsigned>(n),
+            static_cast<unsigned>(ESP.getMaxAllocHeap()));
+        return false;
+    }
+#endif
     out.data.resize(n);
     if (f.read(out.data.data(), n) != static_cast<int>(n)) {
         std::vector<uint8_t>().swap(out.data);
