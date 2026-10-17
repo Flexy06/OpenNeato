@@ -18,20 +18,27 @@ interface SessionPickerProps {
 }
 
 export function SessionPicker({ current, busy, onPick, onError }: SessionPickerProps) {
-    const { formatDateTime, formatDuration, formatNumber } = useI18n();
+    const { t, formatDateTime, formatDuration, formatNumber } = useI18n();
     const [files, setFiles] = useState<HistoryFileInfo[] | null>(null);
+    const [failed, setFailed] = useState(false);
+    const [collecting, setCollecting] = useState(false);
 
     useEffect(() => {
         api.getHistoryList()
             .then((list) =>
                 setFiles(
                     list
-                        .filter((f) => !f.recording && f.session?.mode === "house" && (f.summary?.snapshots ?? 0) >= 20)
+                        // A session whose summary line was damaged (power loss, full flash) has no
+                        // summary — still offer it, the path itself is usually fine.
+                        .filter(
+                            (f) => !f.recording && f.session?.mode === "house" && (f.summary?.snapshots ?? 20) >= 20,
+                        )
                         .sort((a, b) => (b.session?.time ?? 0) - (a.session?.time ?? 0)),
                 ),
             )
             .catch((e: unknown) => {
                 setFiles([]);
+                setFailed(true);
                 onError(normalizeError(e, "Failed to load cleaning history"));
             });
     }, [onError]);
@@ -40,6 +47,29 @@ export function SessionPicker({ current, busy, onPick, onError }: SessionPickerP
         return (
             <div class="history-empty">
                 <T>Loading...</T>
+            </div>
+        );
+    }
+    if (failed) {
+        return (
+            <div class="floormap-note">
+                <T>
+                    The cleaning history could not be read. Download the diagnostics and send them, they contain the raw
+                    answer of the ESP32.
+                </T>
+                <div class="floormap-trace-actions">
+                    <button
+                        type="button"
+                        class="floormap-btn"
+                        disabled={collecting}
+                        onClick={() => {
+                            setCollecting(true);
+                            downloadDiagnostics().finally(() => setCollecting(false));
+                        }}
+                    >
+                        {collecting ? t("Collecting...") : t("Download diagnostics")}
+                    </button>
+                </div>
             </div>
         );
     }

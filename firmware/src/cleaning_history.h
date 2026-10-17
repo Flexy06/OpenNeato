@@ -84,6 +84,7 @@ private:
     bool recoveryAttempted = false; // Only try orphan recovery once after boot
     size_t snapshotCount = 0;
     bool scanArmed = false;
+    bool scanSpaceWarned = false;
     bool scanRecording = false;
     size_t scanCount = 0;
     void collectScan(float x0, float y0, float t0);

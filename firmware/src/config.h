@@ -204,6 +204,7 @@ enum CommandStatus {
 #define HISTORY_SCAN_EVERY 3 // Mapping run: record a LIDAR scan every Nth pose snapshot (~6s)
 #define HISTORY_SCAN_BINS 180 // Scans are stored as 2° bins ...
 #define HISTORY_SCAN_UNIT_MM 20 // ... of 20 mm steps (1 byte, 0 = no return, max 5.1 m)
+#define HISTORY_SCAN_MIN_FREE_BYTES 131072 // Stop recording scans when less flash than this is free
 
 // Floor map (pinned cleaning session + rooms + no-go zones) — see floor_map.h
 #define FLOORMAP_DIR "/map"

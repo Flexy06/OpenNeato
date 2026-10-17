@@ -147,6 +147,8 @@ void CleaningHistory::startCollection(const String& uiState) {
     scanRecording = scanArmed && cleanMode == "house";
     scanArmed = false;
     scanCount = 0;
+    scanSpaceWarned = false;
+    writeBuffer.clear(); // Never carry lines of a previous session over
 
     // Create session file: /history/<epoch>.jsonl
     activeFilePath = String(HISTORY_DIR) + "/" + String(static_cast<long>(sessionStartTime)) + ".jsonl";
@@ -807,8 +809,16 @@ static String base64Encode(const uint8_t *data, size_t len) {
 // the averaged pose (the robot keeps moving while the ~5 KB response arrives).
 // Line format: {"type":"scan","x":m,"y":m,"t":deg,"d":"<base64 of 180 bins>"}
 void CleaningHistory::collectScan(float x0, float y0, float t0) {
+    if (SPIFFS.totalBytes() - SPIFFS.usedBytes() < HISTORY_SCAN_MIN_FREE_BYTES) {
+        fetchPending = false;
+        if (!scanSpaceWarned) {
+            scanSpaceWarned = true;
+            LOG("HIST", "Mapping run: flash nearly full — no more LIDAR scans recorded");
+        }
+        return;
+    }
     neato.getLdsScan([this, x0, y0, t0](bool ok, const LdsScanData& scan) {
-        if (!ok || !collecting) {
+        if (!ok || !collecting || !scanRecording) {
             fetchPending = false;
             return;
         }
@@ -828,7 +838,9 @@ void CleaningHistory::collectScan(float x0, float y0, float t0) {
         String encoded = base64Encode(bins, HISTORY_SCAN_BINS);
         neato.getRobotPos(true, [this, x0, y0, t0, encoded](bool posOk, const RobotPosData& pos) {
             fetchPending = false;
-            if (!collecting)
+            if (!collecting || !scanRecording)
+                return;
+            if (!std::isfinite(x0) || !std::isfinite(y0) || !std::isfinite(t0))
                 return;
             float x1 = x0;
             float y1 = y0;
@@ -1085,9 +1097,18 @@ std::vector<HistorySessionInfo> CleaningHistory::listSessions() {
             } else {
                 String firstLine, lastLine;
                 readFirstLastLines(fullPath, info.compressed, firstLine, lastLine);
-                info.session = firstLine;
+                // Lines are embedded verbatim into the list response — a damaged
+                // line (power loss, full flash) must not break the whole list.
+                if (isJsonObjectLine(firstLine)) {
+                    info.session = firstLine;
+                } else if (firstLine.length() > 0) {
+                    LOG("HIST", "Damaged session header in %s", name.c_str());
+                }
                 if (lastLine.indexOf("\"type\":\"summary\"") >= 0) {
-                    info.summary = lastLine;
+                    if (isJsonObjectLine(lastLine))
+                        info.summary = lastLine;
+                    else
+                        LOG("HIST", "Damaged summary in %s", name.c_str());
                 }
                 // Cache for subsequent requests
                 metaCache[name] = {info.session, info.summary};

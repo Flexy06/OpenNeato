@@ -35,6 +35,75 @@ String jsonEscape(const String& s) {
     return out;
 }
 
+// True if v is a valid JSON number (INT/FLOAT) or true/false (BOOL)
+static bool isJsonScalar(const String& v, FieldType type) {
+    if (type == FIELD_BOOL)
+        return v == "true" || v == "false";
+    int n = static_cast<int>(v.length());
+    int i = 0;
+    if (i < n && v[i] == '-')
+        i++;
+    int digits = 0;
+    while (i < n && isDigit(v[i])) {
+        i++;
+        digits++;
+    }
+    if (i < n && v[i] == '.') {
+        i++;
+        while (i < n && isDigit(v[i])) {
+            i++;
+            digits++;
+        }
+    }
+    if (digits == 0)
+        return false;
+    if (i < n && (v[i] == 'e' || v[i] == 'E')) {
+        i++;
+        if (i < n && (v[i] == '+' || v[i] == '-'))
+            i++;
+        int exp = 0;
+        while (i < n && isDigit(v[i])) {
+            i++;
+            exp++;
+        }
+        if (exp == 0)
+            return false;
+    }
+    return i == n;
+}
+
+bool isJsonObjectLine(const String& s) {
+    int n = static_cast<int>(s.length());
+    if (n < 2 || s[0] != '{' || s[n - 1] != '}')
+        return false;
+    int depth = 0;
+    bool inStr = false;
+    for (int i = 0; i < n; i++) {
+        char c = s[i];
+        if (inStr) {
+            if (c == '\\')
+                i++;
+            else if (c == '"')
+                inStr = false;
+            else if (static_cast<unsigned char>(c) < 0x20)
+                return false;
+            continue;
+        }
+        if (c == '"')
+            inStr = true;
+        else if (c == '{' || c == '[')
+            depth++;
+        else if (c == '}' || c == ']') {
+            if (--depth < 0)
+                return false;
+            if (depth == 0 && i != n - 1)
+                return false;
+        } else if ((c == ':' || c == ',') && i + 1 < n && (s[i + 1] == ',' || s[i + 1] == '}'))
+            return false; // Missing value / trailing comma
+    }
+    return depth == 0 && !inStr;
+}
+
 String fieldsToJsonInner(const std::vector<Field>& fields) {
     String json;
     for (size_t i = 0; i < fields.size(); i++) {
@@ -44,8 +113,10 @@ String fieldsToJsonInner(const std::vector<Field>& fields) {
         if (fields[i].type == FIELD_STRING) {
             json += "\"" + jsonEscape(fields[i].value) + "\"";
         } else {
-            // INT, FLOAT, BOOL all render as-is (42, 14.58, true/false)
-            json += fields[i].value;
+            // INT, FLOAT, BOOL render as-is (42, 14.58, true/false). Anything that is not a
+            // valid JSON number/bool (empty, "nan", "inf", "ovf" from String(float)) becomes
+            // null so one bad value can never break the whole document.
+            json += isJsonScalar(fields[i].value, fields[i].type) ? fields[i].value : String("null");
         }
     }
     return json;

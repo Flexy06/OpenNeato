@@ -529,5 +529,6 @@
   "Hide on map": "Masquer sur la carte",
   "Show on map": "Afficher sur la carte",
   "Last room clean": "Dernier nettoyage de pièces",
-  "Orange: driven path (solid while cleaning). Green/red ticks: position corrections from the LIDAR map (accepted/rejected). Red crosses: obstacles.": "Orange : trajet parcouru (plein pendant le nettoyage). Traits verts/rouges : corrections de position par la carte LIDAR (acceptées/rejetées). Croix rouges : obstacles."
+  "Orange: driven path (solid while cleaning). Green/red ticks: position corrections from the LIDAR map (accepted/rejected). Red crosses: obstacles.": "Orange : trajet parcouru (plein pendant le nettoyage). Traits verts/rouges : corrections de position par la carte LIDAR (acceptées/rejetées). Croix rouges : obstacles.",
+  "The cleaning history could not be read. Download the diagnostics and send them, they contain the raw answer of the ESP32.": "L'historique de nettoyage n'a pas pu être lu. Téléchargez le diagnostic et envoyez-le, il contient la réponse brute de l'ESP32."
 }

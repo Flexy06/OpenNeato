@@ -23,6 +23,11 @@ String jsonEscape(const String& s);
 // INT, FLOAT, BOOL render as-is (42, 14.58, true/false); STRING is quoted and escaped.
 String fieldsToJson(const std::vector<Field>& fields);
 
+// Cheap structural check of a single-line JSON object (balanced braces/brackets outside
+// strings, no control characters, no missing values). Used before embedding stored lines
+// verbatim into a larger response.
+bool isJsonObjectLine(const String& s);
+
 // Same as fieldsToJson but without the outer braces — for embedding inside a larger object.
 String fieldsToJsonInner(const std::vector<Field>& fields);
 
