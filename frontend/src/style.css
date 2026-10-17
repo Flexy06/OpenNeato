@@ -2616,6 +2616,40 @@ input:disabled {
     padding-top: 4px;
 }
 
+/* With a map: no page scrolling. The map takes the free height, only the panel
+   area below scrolls when it holds more than fits (many rooms). */
+.floormap-page.fixed {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    padding-bottom: 12px;
+}
+
+.floormap-page.fixed > .history-canvas-wrap {
+    flex: 1 1 0;
+    min-height: 200px;
+}
+
+.floormap-page.fixed .floormap-canvas {
+    height: 100%;
+    aspect-ratio: auto;
+    max-height: none;
+}
+
+.floormap-page.fixed > .floormap-tabs,
+.floormap-page.fixed > .history-map-hint {
+    flex: none;
+}
+
+.floormap-scroll {
+    flex: 0 1 auto;
+    min-height: 0;
+    max-height: 48%;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
 .floormap-canvas.drawing {
     cursor: crosshair;
 }

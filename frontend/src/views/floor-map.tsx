@@ -236,8 +236,14 @@ export function FloorMapView({ state, robotReady }: FloorMapViewProps) {
     useEffect(() => {
         const onResize = () => redraw();
         window.addEventListener("resize", onResize);
-        return () => window.removeEventListener("resize", onResize);
-    }, [redraw]);
+        // The map takes the height left over by the panel below; redraw when it changes
+        const ro = canvasEl && typeof ResizeObserver !== "undefined" ? new ResizeObserver(onResize) : null;
+        if (ro && canvasEl) ro.observe(canvasEl);
+        return () => {
+            window.removeEventListener("resize", onResize);
+            ro?.disconnect();
+        };
+    }, [redraw, canvasEl]);
 
     // -- Editing gestures ----------------------------------------------------------------
     const dragRef = useRef<{ kind: "draw" | "vertex" | "move"; last: MapVertex; vertex: number } | null>(null);
@@ -497,7 +503,7 @@ export function FloorMapView({ state, robotReady }: FloorMapViewProps) {
 
             <ErrorBannerStack errors={errors} />
 
-            <div class="history-page floormap-page">
+            <div class={`history-page floormap-page${!loading && !picking && map ? " fixed" : ""}`}>
                 {loading && (
                     <div class="history-empty">
                         <T>Loading...</T>
@@ -584,67 +590,71 @@ export function FloorMapView({ state, robotReady }: FloorMapViewProps) {
                             )}
                         </div>
 
-                        {tab === "clean" ? (
-                            <>
-                                <CleanPanel
-                                    map={map}
-                                    selection={selection}
-                                    status={status}
-                                    canStart={canStart}
-                                    startHint={startHint}
-                                    pending={pendingAction}
-                                    onToggle={(id) =>
-                                        setSelection((prev) => {
-                                            const next = new Set(prev);
-                                            if (next.has(id)) next.delete(id);
-                                            else next.add(id);
-                                            return next;
-                                        })
-                                    }
-                                    onSelectAll={(all) => setSelection(new Set(all ? map.rooms.map((r) => r.id) : []))}
-                                    onStart={() =>
-                                        runGuided(() => api.guidedStart([...selection].sort((a, b) => a - b)))
-                                    }
-                                    onHome={() => runGuided(api.guidedHome)}
-                                    onStop={() => runGuided(api.guidedStop)}
-                                />
-                                {trace && !active && (
-                                    <TraceCard
-                                        trace={trace}
-                                        shown={showTrace}
-                                        onToggle={() => setShowTrace(!showTrace)}
+                        <div class="floormap-scroll">
+                            {tab === "clean" ? (
+                                <>
+                                    <CleanPanel
+                                        map={map}
+                                        selection={selection}
+                                        status={status}
+                                        canStart={canStart}
+                                        startHint={startHint}
+                                        pending={pendingAction}
+                                        onToggle={(id) =>
+                                            setSelection((prev) => {
+                                                const next = new Set(prev);
+                                                if (next.has(id)) next.delete(id);
+                                                else next.add(id);
+                                                return next;
+                                            })
+                                        }
+                                        onSelectAll={(all) =>
+                                            setSelection(new Set(all ? map.rooms.map((r) => r.id) : []))
+                                        }
+                                        onStart={() =>
+                                            runGuided(() => api.guidedStart([...selection].sort((a, b) => a - b)))
+                                        }
+                                        onHome={() => runGuided(api.guidedHome)}
+                                        onStop={() => runGuided(api.guidedStop)}
                                     />
-                                )}
-                            </>
-                        ) : (
-                            <EditPanel
-                                map={map}
-                                target={editTarget}
-                                armed={armed}
-                                dirty={dirty}
-                                saving={saving}
-                                onArm={(k) => {
-                                    setArmed(k);
-                                    setEditTarget(null);
-                                }}
-                                onSelect={(target) => {
-                                    setEditTarget(target);
-                                    setActiveVertex(null);
-                                }}
-                                onRename={() => setConfirm("rename")}
-                                onAddCorner={addCorner}
-                                onRemoveCorner={removeCorner}
-                                onDelete={() => setConfirm("deleteZone")}
-                                onSave={save}
-                                onDiscard={() => {
-                                    const restored = savedDoc ? parseFloorMap(savedDoc) : null;
-                                    if (restored) setMap(restored);
-                                    setEditTarget(null);
-                                }}
-                                onReplace={() => setPicking(true)}
-                                onDeleteMap={() => setConfirm("deleteMap")}
-                            />
-                        )}
+                                    {trace && !active && (
+                                        <TraceCard
+                                            trace={trace}
+                                            shown={showTrace}
+                                            onToggle={() => setShowTrace(!showTrace)}
+                                        />
+                                    )}
+                                </>
+                            ) : (
+                                <EditPanel
+                                    map={map}
+                                    target={editTarget}
+                                    armed={armed}
+                                    dirty={dirty}
+                                    saving={saving}
+                                    onArm={(k) => {
+                                        setArmed(k);
+                                        setEditTarget(null);
+                                    }}
+                                    onSelect={(target) => {
+                                        setEditTarget(target);
+                                        setActiveVertex(null);
+                                    }}
+                                    onRename={() => setConfirm("rename")}
+                                    onAddCorner={addCorner}
+                                    onRemoveCorner={removeCorner}
+                                    onDelete={() => setConfirm("deleteZone")}
+                                    onSave={save}
+                                    onDiscard={() => {
+                                        const restored = savedDoc ? parseFloorMap(savedDoc) : null;
+                                        if (restored) setMap(restored);
+                                        setEditTarget(null);
+                                    }}
+                                    onReplace={() => setPicking(true)}
+                                    onDeleteMap={() => setConfirm("deleteMap")}
+                                />
+                            )}
+                        </div>
                     </>
                 )}
 
