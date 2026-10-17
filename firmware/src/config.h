@@ -279,7 +279,19 @@ enum CommandStatus {
 #define GUIDED_TRACE_FLUSH_BYTES 2048
 #define GUIDED_TRACE_EVERY_MM 150 // Pose line after this much travel ...
 #define GUIDED_TRACE_EVERY_DEG 20.0f // ... or this much turning
-#define GUIDED_RUN_GAP_MM 1200 // Recorded points further apart than this start a new cleaning run
+#define GUIDED_RUN_GAP_MM 1200
+// Structured coverage: parallel lanes (boustrophedon) inside each selected room
+#define GUIDED_LANE_SPACING_MM 250 // Lane distance (brush ~ 270 mm wide → slight overlap)
+#define GUIDED_LANE_POINT_MM 300 // Waypoint spacing along a lane
+#define GUIDED_LANE_MIN_MM 200 // Shorter free stretches are not worth a lane
+#define GUIDED_FIELD_FREE_MAX 68 // Field value ≤ this = ≥ ~220 mm from any wall (robot centre fits)
+// Continuous driving: arcs instead of turn-then-drive, next command before the robot stops
+#define GUIDED_ARC_MAX_DEG 55.0f // Heading errors up to this are driven as an arc
+#define GUIDED_CHAIN_MM 180 // Issue the next command when this little of the current one is left
+#define GUIDED_CHAIN_REACH_MM 250 // While chaining, a waypoint this close counts as reached
+#define GUIDED_LOC_MOVING_EVERY_MM                                                                                     \
+    600 // Scan-match on the move after this much travel // Recorded points further apart than this start a new cleaning
+        // run
 
 // Task Watchdog Timer (TWDT) — hardware watchdog that resets the ESP32 if
 // loop() stops running (deadlock, infinite loop, blocking I/O). The main task

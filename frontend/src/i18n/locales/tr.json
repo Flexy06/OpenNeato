@@ -530,5 +530,8 @@
   "Show on map": "Haritada göster",
   "Last room clean": "Son oda temizliği",
   "Orange: driven path (solid while cleaning). Green/red ticks: position corrections from the LIDAR map (accepted/rejected). Red crosses: obstacles.": "Turuncu: gidilen yol (temizlerken düz çizgi). Yeşil/kırmızı çizgiler: LIDAR haritasıyla konum düzeltmeleri (kabul/ret). Kırmızı çarpılar: engeller.",
-  "The cleaning history could not be read. Download the diagnostics and send them, they contain the raw answer of the ESP32.": "Temizlik geçmişi okunamadı. Tanılamayı indirip gönderin, ESP32'nin ham yanıtını içerir."
+  "The cleaning history could not be read. Download the diagnostics and send them, they contain the raw answer of the ESP32.": "Temizlik geçmişi okunamadı. Tanılamayı indirip gönderin, ESP32'nin ham yanıtını içerir.",
+  "Back on the dock.": "İstasyona geri döndü.",
+  "Did not reach the dock: put it on the dock by hand.": "İstasyona ulaşamadı: robotu elle istasyona koyun.",
+  "Docking was handed over to the robot.": "Yanaşma robota devredildi."
 }

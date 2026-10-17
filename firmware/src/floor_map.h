@@ -61,6 +61,10 @@ struct LocField {
 
     bool valid() const { return w > 0 && h > 0 && data.size() == static_cast<size_t>(w) * static_cast<size_t>(h); }
     // Field value at a world point (0 outside)
+    bool inside(float x, float y) const {
+        return x >= static_cast<float>(originX) && y >= static_cast<float>(originY) &&
+               x < static_cast<float>(originX + w * cell) && y < static_cast<float>(originY + h * cell);
+    }
     uint8_t at(float x, float y) const {
         int cx = static_cast<int>(floorf((x - static_cast<float>(originX)) / static_cast<float>(cell)));
         int cy = static_cast<int>(floorf((y - static_cast<float>(originY)) / static_cast<float>(cell)));

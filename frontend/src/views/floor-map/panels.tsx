@@ -494,6 +494,15 @@ export function TraceCard({ trace, shown, onToggle }: TraceCardProps) {
                     {t("{n} obstacles", { n: sm.obstacles })}
                 </span>
             </div>
+            {sm.result === "done" && (
+                <div class="floormap-note small">
+                    {sm.docked === true
+                        ? t("Back on the dock.")
+                        : sm.docked === false
+                          ? t("Did not reach the dock: put it on the dock by hand.")
+                          : t("Docking was handed over to the robot.")}
+                </div>
+            )}
             <div class="floormap-note small">{verdict}</div>
             <div class="floormap-trace-actions">
                 <button type="button" class={`floormap-btn${shown ? " primary" : ""}`} onClick={onToggle}>

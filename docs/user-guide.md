@@ -513,11 +513,15 @@ position estimate; **Return to dock** ends cleaning early, **Stop** halts the ro
 
 ### How It Works and Limitations
 
-- **Route**: the recorded points inside the selected rooms (minus anything within ~28 cm of a
-  no-go zone) are split into cleaning runs. Runs are visited nearest-first, in either direction.
-  Between runs and on the way home the robot takes the shortest path over floor it covered during
-  the recording (BFS on a 20 cm grid), so it never replays detours through other rooms.
-- **Driving**: TestMode + `SetMotor`, stop-and-go segments (turn in place, drive at most 60 cm).
+- **Route**: each selected room is covered in parallel lanes 25 cm apart, along its longer
+  side, over the free floor of the LIDAR wall map (at least ~22 cm from walls, minus anything
+  near a no-go zone). Lane pieces are visited nearest-first in alternating direction, so the
+  robot cleans in a serpentine. Without a wall map the lanes are limited to floor the recording
+  covered. Between lanes, rooms and on the way home the robot takes the shortest path over free
+  floor (BFS on a 20 cm grid).
+- **Driving**: TestMode + `SetMotor`. Moderate heading changes are driven as arcs; the next
+  command is sent before the current one ends, so the robot keeps rolling through waypoints and
+  only stops to turn on the spot for sharp turns. LIDAR fixes are taken while driving.
 - **Position**: wheel-encoder dead reckoning from the dock, corrected by matching LIDAR scans
   against the wall map of the mapping run (correlative scan matching, a new fix every 40 cm or
   30° of travel). The first fix happens on the dock. The status line shows **Map lock N %**, the
@@ -530,7 +534,9 @@ position estimate; **Return to dock** ends cleaning early, **Stop** halts the ro
   repeated obstacles send the robot home.
 - **Docking**: the robot drives to a staging point 90 cm in front of the dock, turns to the dock
   heading and matches a LIDAR scan against the wall map (or, without one, against the scan taken on
-  the dock) to correct its position. It
+  the dock) to correct its position. Once it touches the contacts it stops; if neither the contacts
+  nor the charger report dock power it lines up again, and finally hands over to the robot's own
+  return-to-base, which is then verified for up to 2.5 minutes (result in the run trace). It
   then reverses along the dock axis, steering its rear onto the line, re-checks the alignment with a
   second scan 30 cm out and backs straight onto the contacts. A miss triggers one more line-up;
   after that it hands over to the robot's own return-to-base.

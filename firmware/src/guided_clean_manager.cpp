@@ -176,12 +176,15 @@ String GuidedCleanManager::buildPlan(const FloorMapData& map, const String& room
         return "no rooms defined on the map";
 
     nogos = map.nogos;
+    // The localization field doubles as the free-space map for lanes and planning
+    if (!floorMap.loadField(field))
+        field = LocField();
 
     // The dock is the map origin; refuse plans that start inside a no-go zone
     if (nearNogo(0.0f, 0.0f))
         return "the dock lies inside a no-go zone";
 
-    // Coverage grid over the recorded path (+ margin)
+    // Coverage grid over the recorded path and the selected rooms (+ margin)
     int minX = 0;
     int minY = 0;
     int maxX = 0;
@@ -191,6 +194,14 @@ String GuidedCleanManager::buildPlan(const FloorMapData& map, const String& room
         minY = p.y < minY ? p.y : minY;
         maxX = p.x > maxX ? p.x : maxX;
         maxY = p.y > maxY ? p.y : maxY;
+    }
+    for (const MapZone *r: selected) {
+        for (const auto& v: r->poly) {
+            minX = v.x < minX ? v.x : minX;
+            minY = v.y < minY ? v.y : minY;
+            maxX = v.x > maxX ? v.x : maxX;
+            maxY = v.y > maxY ? v.y : maxY;
+        }
     }
     int margin = GUIDED_COVER_STAMP_MM + GUIDED_COVER_CELL_MM;
     cover.init(minX - margin, minY - margin, maxX + margin, maxY + margin);
@@ -217,10 +228,140 @@ String GuidedCleanManager::buildPlan(const FloorMapData& map, const String& room
         py = p.y;
     }
 
-    // Cleaning runs: recorded points inside the selected rooms (and clear of
-    // no-go zones), split wherever the recording left the rooms or jumped.
-    // Runs are visited nearest-first; transit between them is planned on the
-    // coverage grid, so the robot no longer replays detours through other rooms.
+    buildGrid();
+
+    // Cleaning runs: parallel lanes over the free floor of each selected room
+    // (structured coverage, independent of how the recording wandered). Without a
+    // localization field the free floor is what the recording covered; if no lane
+    // fits at all, fall back to the recorded points inside the rooms.
+    // Runs are visited nearest-first in either direction (→ serpentine order);
+    // transit between them is planned on the grid.
+    buildLanes(selected);
+    if (cleanPts.empty()) {
+        LOG("GUIDED", "Plan: no lanes fit — following the recorded path instead");
+        planRecorded(map, selected);
+    }
+
+    if (cleanPts.empty()) {
+        freePlan();
+        return "no free floor found in the selected rooms";
+    }
+    cleanTotal = static_cast<int>(cleanPts.size());
+    cleanPts.shrink_to_fit();
+
+    LOG("GUIDED", "Plan: %d clean points in %u runs, %u no-go zones, grid %dx%d @%dmm", cleanTotal,
+        static_cast<unsigned>(runs.size()), static_cast<unsigned>(nogos.size()), grid.w, grid.h, grid.cell);
+    return "";
+}
+
+
+// -- Cleaning runs ----------------------------------------------------------------
+
+// Free floor for the robot centre at (x, y): ≥ ~220 mm from walls in the LIDAR
+// map (or driven over during the recording), reachable from the dock and clear
+// of no-go zones.
+bool GuidedCleanManager::floorFree(float x, float y) const {
+    int cx = 0;
+    int cy = 0;
+    grid.toCell(x, y, cx, cy);
+    if (!grid.inside(cx, cy) || !grid.free[static_cast<size_t>(grid.index(cx, cy))])
+        return false;
+    if (nearNogo(x, y))
+        return false;
+    if (field.valid() && field.inside(x, y))
+        return field.at(x, y) <= GUIDED_FIELD_FREE_MAX;
+    return cover.covered(x, y);
+}
+
+void GuidedCleanManager::addRun(const std::vector<Waypoint>& pts) {
+    if (pts.empty() || cleanPts.size() + pts.size() > 60000)
+        return;
+    Run r;
+    r.first = static_cast<uint16_t>(cleanPts.size());
+    for (const Waypoint& w: pts)
+        cleanPts.push_back(w);
+    r.last = static_cast<uint16_t>(cleanPts.size() - 1);
+    runs.push_back(r);
+}
+
+void GuidedCleanManager::buildLanes(const std::vector<const MapZone *>& selected) {
+    const float spacing = GUIDED_LANE_SPACING_MM;
+    const float sample = 50.0f;
+    for (const MapZone *room: selected) {
+        float minX = 1e9f;
+        float minY = 1e9f;
+        float maxX = -1e9f;
+        float maxY = -1e9f;
+        for (const auto& v: room->poly) {
+            minX = fminf(minX, v.x);
+            minY = fminf(minY, v.y);
+            maxX = fmaxf(maxX, v.x);
+            maxY = fmaxf(maxY, v.y);
+        }
+        // Lanes along the longer side: fewer turns
+        bool alongX = (maxX - minX) >= (maxY - minY);
+        float a0 = alongX ? minX : minY;
+        float a1 = alongX ? maxX : maxY;
+        float b0 = alongX ? minY : minX;
+        float b1 = alongX ? maxY : maxX;
+        int lanes = static_cast<int>((b1 - b0) / spacing);
+        if (lanes < 1)
+            lanes = 1;
+        // Centre the lanes in the room
+        float first = b0 + ((b1 - b0) - static_cast<float>(lanes - 1) * spacing) / 2.0f;
+        for (int l = 0; l < lanes; l++) {
+            float b = first + static_cast<float>(l) * spacing;
+            std::vector<Waypoint> pts;
+            float runStart = 0.0f;
+            float lastPt = 0.0f;
+            bool inRun = false;
+            float prevA = a0;
+            auto flush = [&](float endA) {
+                if (inRun && endA - runStart >= GUIDED_LANE_MIN_MM) {
+                    if (endA - lastPt > 60.0f) {
+                        Waypoint w;
+                        w.x = static_cast<int16_t>(alongX ? endA : b);
+                        w.y = static_cast<int16_t>(alongX ? b : endA);
+                        w.clean = true;
+                        w.room = static_cast<uint8_t>(room->id);
+                        pts.push_back(w);
+                    }
+                    addRun(pts);
+                }
+                pts.clear();
+                inRun = false;
+            };
+            for (float a = a0; a <= a1; a += sample) {
+                float x = alongX ? a : b;
+                float y = alongX ? b : a;
+                bool ok = mapgeo::pointInPolygon(x, y, room->poly) && floorFree(x, y);
+                if (!ok) {
+                    flush(prevA);
+                    prevA = a;
+                    continue;
+                }
+                if (!inRun) {
+                    inRun = true;
+                    runStart = a;
+                    lastPt = a - GUIDED_LANE_POINT_MM;
+                }
+                if (a - lastPt >= GUIDED_LANE_POINT_MM) {
+                    Waypoint w;
+                    w.x = static_cast<int16_t>(x);
+                    w.y = static_cast<int16_t>(y);
+                    w.clean = true;
+                    w.room = static_cast<uint8_t>(room->id);
+                    pts.push_back(w);
+                    lastPt = a;
+                }
+                prevA = a;
+            }
+            flush(prevA);
+        }
+    }
+}
+
+void GuidedCleanManager::planRecorded(const FloorMapData& map, const std::vector<const MapZone *>& selected) {
     cleanPts.reserve(map.path.size() / 2);
     bool inRun = false;
     for (const auto& p: map.path) {
@@ -261,19 +402,6 @@ String GuidedCleanManager::buildPlan(const FloorMapData& map, const String& room
         cleanPts.push_back(w);
         runs.back().last = static_cast<uint16_t>(cleanPts.size() - 1);
     }
-
-    if (cleanPts.empty()) {
-        freePlan();
-        return "the pinned path never enters the selected rooms";
-    }
-    cleanTotal = static_cast<int>(cleanPts.size());
-    cleanPts.shrink_to_fit();
-
-    buildGrid();
-
-    LOG("GUIDED", "Plan: %d clean points in %u runs, %u no-go zones, grid %dx%d @%dmm", cleanTotal,
-        static_cast<unsigned>(runs.size()), static_cast<unsigned>(nogos.size()), grid.w, grid.h, grid.cell);
-    return "";
 }
 
 // -- Planning grid ------------------------------------------------------------------
@@ -318,7 +446,12 @@ void GuidedCleanManager::buildGrid() {
                         hits++;
                 }
             }
-            bool ok = hits * 2 >= sub * sub && !nearNogo(grid.centerX(cx), grid.centerY(cy));
+            float gx = grid.centerX(cx);
+            float gy = grid.centerY(cy);
+            // Driven over during the recording, or clear of walls in the LIDAR map
+            bool driven = hits * 2 >= sub * sub;
+            bool mapped = field.valid() && field.inside(gx, gy) && field.at(gx, gy) <= GUIDED_FIELD_FREE_MAX;
+            bool ok = (driven || mapped) && !nearNogo(gx, gy);
             grid.free[static_cast<size_t>(grid.index(cx, cy))] = ok ? 1 : 0;
         }
     }
@@ -332,6 +465,37 @@ void GuidedCleanManager::buildGrid() {
         if (grid.inside(cx, cy) && !nearNogo(static_cast<float>(x), 0.0f))
             grid.free[static_cast<size_t>(grid.index(cx, cy))] = 1;
     }
+
+    // Keep only floor reachable from the dock: open space outside the walls (the
+    // field is "far from walls" there too) or behind closed doors is not floor.
+    std::vector<uint8_t> seen(grid.free.size(), 0);
+    std::vector<uint16_t> queue;
+    queue.reserve(256);
+    int sx = 0;
+    int sy = 0;
+    grid.toCell(static_cast<float>(GUIDED_DOCK_STAGING_MM) / 2.0f, 0.0f, sx, sy);
+    if (grid.inside(sx, sy) && grid.free[static_cast<size_t>(grid.index(sx, sy))]) {
+        seen[static_cast<size_t>(grid.index(sx, sy))] = 1;
+        queue.push_back(static_cast<uint16_t>(grid.index(sx, sy)));
+    }
+    for (size_t q = 0; q < queue.size(); q++) {
+        int cx = queue[q] % grid.w;
+        int cy = queue[q] / grid.w;
+        static const int8_t DX[4] = {1, -1, 0, 0};
+        static const int8_t DY[4] = {0, 0, 1, -1};
+        for (int k = 0; k < 4; k++) {
+            int nx = cx + DX[k];
+            int ny = cy + DY[k];
+            if (!grid.inside(nx, ny))
+                continue;
+            auto ni = static_cast<size_t>(grid.index(nx, ny));
+            if (seen[ni] || !grid.free[ni])
+                continue;
+            seen[ni] = 1;
+            queue.push_back(static_cast<uint16_t>(ni));
+        }
+    }
+    grid.free.swap(seen);
 }
 
 bool GuidedCleanManager::cellBlocked(int cx, int cy) const {
@@ -759,8 +923,6 @@ String GuidedCleanManager::command(const String& action, const String& rooms) {
         err = buildPlan(map, rooms);
         if (!err.isEmpty())
             return err;
-        if (!floorMap.loadField(field))
-            field = LocField();
 
         runGen++;
         scanJob = nullptr;
@@ -773,6 +935,7 @@ String GuidedCleanManager::command(const String& action, const String& rooms) {
         obstacleStreak = 0;
         obstacleTotal = 0;
         fallbackDock = false;
+        dockWatchSince = 0;
         inTestMode = false;
         dockStage = 0;
         dockAttempts = 0;
@@ -781,6 +944,8 @@ String GuidedCleanManager::command(const String& action, const String& rooms) {
         compassTried = false;
         compassRef = false;
         locInit = false;
+        locMovingPending = false;
+        chaining = false;
         locFixes = 0;
         locScore = 0.0f;
         refScanValid = false;
@@ -919,6 +1084,33 @@ void GuidedCleanManager::tick() {
         });
     }
 
+    // After handing docking over to the robot: verify it really arrives
+    if (dockWatchSince != 0 && !isActive() && dockWatchTicker.elapsed(5000)) {
+        unsigned long since = millis() - dockWatchSince;
+        serial.getCharger([this, since](bool ok, const ChargerData& c) {
+            if (dockWatchSince == 0)
+                return;
+            if (ok && c.extPwrPresent) {
+                dockWatchSince = 0;
+                event("dock_result", {{"docked", "true", FIELD_BOOL}, {"after_s", String(since / 1000), FIELD_INT}});
+                traceFlush();
+                return;
+            }
+            if (since > 60000 && !dockWatchRetried) {
+                dockWatchRetried = true;
+                LOG("GUIDED", "Robot not on the dock after 60 s — asking again");
+                serial.clean("dock", nullptr);
+                return;
+            }
+            if (since > 150000) {
+                dockWatchSince = 0;
+                lastError = "the robot did not reach the dock";
+                event("dock_result", {{"docked", "false", FIELD_BOOL}, {"after_s", String(since / 1000), FIELD_INT}});
+                traceFlush();
+            }
+        });
+    }
+
     if (!isActive() || phase == Phase::Starting || phase == Phase::Finishing)
         return;
 
@@ -937,6 +1129,13 @@ void GuidedCleanManager::tick() {
 
     if (waitingCmd || segStopping)
         return;
+
+    // Localization on the move (continuous driving rarely stops)
+    if (seg == SegKind::Drive && field.valid() && ldsOn && locInit && !locMovingPending && !scanJob &&
+        distSinceFix >= GUIDED_LOC_MOVING_EVERY_MM && millis() - lastScanMs >= 1600 &&
+        (phase == Phase::Running || phase == Phase::Returning)) {
+        requestLocScanMoving();
+    }
 
     // Runtime + battery guards (only while cleaning; returning always continues)
     if (phase == Phase::Running) {
@@ -1053,6 +1252,14 @@ void GuidedCleanManager::onMotors(const MotorData& m) {
 
     int progL = abs(encL - segStartL);
     int progR = abs(encR - segStartR);
+    // Keep rolling: plan the next command before this one runs out
+    if (seg == SegKind::Drive && (phase == Phase::Running || phase == Phase::Returning) && !waitingCmd) {
+        int left = (abs(segCmdL) - progL + abs(segCmdR) - progR) / 2;
+        if (left <= GUIDED_CHAIN_MM && progL + progR > 0) {
+            chainNext();
+            return;
+        }
+    }
     bool reached = progL >= abs(segCmdL) - 15 && progR >= abs(segCmdR) - 15;
     if (reached) {
         endSegment(false);
@@ -1092,6 +1299,12 @@ void GuidedCleanManager::onDigital(const DigitalSensorData& d) {
         LOG("GUIDED", "SAFETY: wheel lifted — aborting");
         serial.setMotorWheels(0, 0, 0, nullptr);
         fail("robot lifted or wheel dropped");
+        return;
+    }
+    if (seg == SegKind::DockBack && d.dcJackIn && !segStopping) {
+        // On the contacts: stop pushing and verify
+        serial.setMotorWheels(0, 0, 0, nullptr);
+        endSegment(false);
         return;
     }
     if (seg == SegKind::None || seg == SegKind::Backoff || seg == SegKind::DockBack || seg == SegKind::Reverse ||
@@ -1277,12 +1490,14 @@ void GuidedCleanManager::selectNextTarget() {
 
 void GuidedCleanManager::step() {
     // Map localization (preferred): first fix on the dock once the LIDAR spins,
-    // then a scan match at every stop after some travel or turning.
-    if (field.valid() && ldsOn) {
+    // then a scan match at every stop after some travel or turning. While the robot
+    // keeps rolling (chaining) fixes are taken on the move from tick() instead.
+    if (field.valid() && ldsOn && !chaining) {
         if (!locInit) {
             if (millis() < ldsReadyAtMs)
                 return;
             locInit = true;
+            dockScanPending = true;
             requestLocScan(GUIDED_LOC_START_RADIUS_MM, GUIDED_LOC_START_ANGLE_DEG, 0xFF);
             return;
         }
@@ -1295,7 +1510,9 @@ void GuidedCleanManager::step() {
 
     // Wall compass (fallback without a map): reference scan on the dock once the
     // LIDAR has spun up, then periodic re-alignment while stopped between segments.
-    if (ldsOn && !compassTried && !field.valid()) {
+    if (chaining && !field.valid()) {
+        // Compass fallback still re-aligns at stops; skip it while rolling
+    } else if (ldsOn && !compassTried && !field.valid()) {
         if (millis() < ldsReadyAtMs)
             return;
         compassTried = true;
@@ -1305,7 +1522,7 @@ void GuidedCleanManager::step() {
     // Direction calibration: once clear of the dock, turn to a heading of
     // ~22.5° (mod 45°) where CW and CCW LIDAR angle conventions disagree most,
     // scan, and lock the sign. Retried up to 3 times along the route.
-    if (!field.valid() && compassRef && compassSign == 0 && phase == Phase::Running && calAttempts < 3 &&
+    if (!chaining && !field.valid() && compassRef && compassSign == 0 && phase == Phase::Running && calAttempts < 3 &&
         sqrtf(poseX * poseX + poseY * poseY) > 300.0f) {
         if (calStage == 0) {
             float target = roundf((poseTheta / DEG - 22.5f) / 45.0f) * 45.0f + 22.5f;
@@ -1324,7 +1541,7 @@ void GuidedCleanManager::step() {
             return;
         }
     }
-    if (!field.valid() && compassRef && compassSign != 0 &&
+    if (!chaining && !field.valid() && compassRef && compassSign != 0 &&
         (distSinceFix >= GUIDED_COMPASS_EVERY_MM || turnSinceFix >= GUIDED_COMPASS_EVERY_DEG * DEG) &&
         millis() - lastScanMs >= 2000) {
         requestScan(false);
@@ -1383,6 +1600,25 @@ bool GuidedCleanManager::driveTowards(float tx, float ty, int speed, bool allowR
         dir = -1.0f;
         err = wrapAngle(err + 3.14159265f);
     }
+    // Forward with a moderate heading error: drive an arc straight onto the
+    // target (pure pursuit) instead of stopping to turn in place first.
+    if (dir > 0 && !allowReverse && fabsf(err) <= GUIDED_ARC_MAX_DEG * DEG) {
+        float look = dist < GUIDED_MAX_STEP_MM ? dist : static_cast<float>(GUIDED_MAX_STEP_MM);
+        float l = look;
+        float r = look;
+        if (fabsf(err) > 1.0f * DEG) {
+            // Circle through the pose, tangent to the heading, through the lookahead
+            // point at bearing err: chord = look, arc angle = 2·err
+            float radius = look / (2.0f * sinf(fabsf(err)));
+            float arcAng = 2.0f * fabsf(err);
+            float inner = arcAng * (radius - GUIDED_WHEEL_BASE_MM / 2.0f);
+            float outer = arcAng * (radius + GUIDED_WHEEL_BASE_MM / 2.0f);
+            l = err > 0 ? inner : outer;
+            r = err > 0 ? outer : inner;
+        }
+        startSegment(SegKind::Drive, static_cast<int>(l), static_cast<int>(r), speed);
+        return true;
+    }
     if (fabsf(err) > GUIDED_HEADING_TOL_DEG * DEG / (allowReverse ? 3.0f : 1.0f)) {
         int arc = static_cast<int>(err * GUIDED_WHEEL_BASE_MM / 2.0f);
         startSegment(SegKind::Turn, -arc, arc, GUIDED_SPEED_TURN);
@@ -1391,6 +1627,27 @@ bool GuidedCleanManager::driveTowards(float tx, float ty, int speed, bool allowR
     int stepMM = static_cast<int>(dist < GUIDED_MAX_STEP_MM ? dist : GUIDED_MAX_STEP_MM) * static_cast<int>(dir);
     startSegment(dir > 0 ? SegKind::Drive : SegKind::Reverse, stepMM, stepMM, speed);
     return true;
+}
+
+// Called while a forward segment is about to end: decide the next command now and
+// send it right away, so the robot keeps rolling instead of stopping at every
+// waypoint (a new SetMotor replaces the running one).
+void GuidedCleanManager::chainNext() {
+    seg = SegKind::None; // No stop command: the next SetMotor takes over
+    if (route.empty() || phase == Phase::Docking)
+        return;
+    chaining = true;
+    const Waypoint& t = route[targetIdx];
+    float dx = static_cast<float>(t.x) - poseX;
+    float dy = static_cast<float>(t.y) - poseY;
+    if (sqrtf(dx * dx + dy * dy) < GUIDED_CHAIN_REACH_MM && routeIdx < route.size() - 1) {
+        obstacleStreak = 0;
+        markReached(targetIdx);
+        if (routeIdx < route.size() - 1)
+            selectNextTarget();
+    }
+    step();
+    chaining = false;
 }
 
 void GuidedCleanManager::setCleaningMotors(bool on) {
@@ -1564,26 +1821,41 @@ void GuidedCleanManager::checkDocked() {
             [this, gen](bool ok, const DigitalSensorData& d) {
                 if (gen != runGen)
                     return;
-                waitingCmd = false;
                 if (ok && d.dcJackIn) {
+                    waitingCmd = false;
                     finish(Phase::Done, lastError);
                     return;
                 }
-                dockAttempts++;
-                if (dockAttempts < GUIDED_DOCK_ATTEMPTS) {
-                    // Missed the contacts: drive back out to the staging point and line up again
-                    LOG("GUIDED", "Dock contacts not detected — retrying approach");
-                    dockStage = 4;
-                    dockIcpTries = 0;
-                    dockIcpNearDone = false;
-                    return;
-                }
-                // Contacts still not found: hand over to the robot's own docking
-                LOG("GUIDED", "Dock contacts not detected — requesting robot docking");
-                fallbackDock = true;
-                finish(Phase::Done, lastError);
+                // Contacts bit not set: the charger may still see dock power
+                serial.getCharger([this, gen](bool cok, const ChargerData& c) {
+                    if (gen != runGen)
+                        return;
+                    waitingCmd = false;
+                    if (cok && c.extPwrPresent) {
+                        finish(Phase::Done, lastError);
+                        return;
+                    }
+                    onDockMissed();
+                });
             },
             PRIORITY_HIGH);
+}
+
+void GuidedCleanManager::onDockMissed() {
+    tracePose("dock_miss", {{"try", String(dockAttempts), FIELD_INT}});
+    dockAttempts++;
+    if (dockAttempts < GUIDED_DOCK_ATTEMPTS) {
+        // Missed the contacts: drive back out to the staging point and line up again
+        LOG("GUIDED", "Dock contacts not detected — retrying approach");
+        dockStage = 4;
+        dockIcpTries = 0;
+        dockIcpNearDone = false;
+        return;
+    }
+    // Contacts still not found: hand over to the robot's own docking
+    LOG("GUIDED", "Dock contacts not detected — requesting robot docking");
+    fallbackDock = true;
+    finish(Phase::Done, lastError);
 }
 
 void GuidedCleanManager::finish(Phase result, const String& reason) {
@@ -1629,8 +1901,11 @@ void GuidedCleanManager::finish(Phase result, const String& reason) {
         phase = result;
         if (!ok)
             LOG("GUIDED", "TestMode Off failed");
-        if (requestDock)
+        if (requestDock) {
             serial.clean("dock", nullptr);
+            dockWatchSince = millis();
+            dockWatchRetried = false;
+        }
         freePlan();
     });
 }
@@ -1782,6 +2057,9 @@ void GuidedCleanManager::requestLocScan(int radiusMM, int angleDeg, uint8_t resu
     uint32_t gen = runGen;
     waitingCmd = true;
     lastScanMs = millis();
+    mcX = poseX;
+    mcY = poseY;
+    mcT = poseTheta;
     fetchScan([this, gen, radiusMM, angleDeg, resumeStage](bool ok, const LdsScanData& scan) {
         if (gen != runGen)
             return;
@@ -1790,8 +2068,33 @@ void GuidedCleanManager::requestLocScan(int radiusMM, int angleDeg, uint8_t resu
         turnSinceFix = 0.0f;
         if (resumeStage != 0xFF)
             dockStage = resumeStage;
+        if (ok && dockScanPending) {
+            dockScanPending = false;
+            traceDockScan(scan);
+        }
         if (ok)
             matchField(scan, radiusMM, angleDeg);
+    });
+}
+
+// Scan match while the robot keeps driving: the scan reflects (roughly) the pose
+// at request time, so the search is centred there and the correction is applied
+// as a delta to the then-current pose. Does not block the segment executor.
+void GuidedCleanManager::requestLocScanMoving() {
+    uint32_t gen = runGen;
+    locMovingPending = true;
+    lastScanMs = millis();
+    mcX = poseX;
+    mcY = poseY;
+    mcT = poseTheta;
+    distSinceFix = 0.0f;
+    turnSinceFix = 0.0f;
+    fetchScan([this, gen](bool ok, const LdsScanData& scan) {
+        if (gen != runGen)
+            return;
+        locMovingPending = false;
+        if (ok)
+            matchField(scan, GUIDED_LOC_RADIUS_MM, GUIDED_LOC_ANGLE_DEG);
     });
 }
 
@@ -1823,18 +2126,22 @@ bool GuidedCleanManager::matchField(const LdsScanData& scan, int radiusMM, int a
     const auto cell = static_cast<float>(field.cell);
     const int steps = radiusMM / field.cell;
     float bestScore = -1.0f;
-    float bestT = poseTheta;
-    float bestX = poseX;
-    float bestY = poseY;
+    // Search around the pose at scan time (the robot may have moved since)
+    const float cX = mcX;
+    const float cY = mcY;
+    const float cT = mcT;
+    float bestT = cT;
+    float bestX = cX;
+    float bestY = cY;
     int *bx = mfBx;
     int *by = mfBy;
     for (int da = -angleDeg; da <= angleDeg; da += 2) {
-        float th = poseTheta + static_cast<float>(da) * DEG;
+        float th = cT + static_cast<float>(da) * DEG;
         float c = cosf(th);
         float s = sinf(th);
         for (int i = 0; i < n; i++) {
-            float wx = poseX + c * px[i] - s * py[i];
-            float wy = poseY + s * px[i] + c * py[i];
+            float wx = cX + c * px[i] - s * py[i];
+            float wy = cY + s * px[i] + c * py[i];
             bx[i] = static_cast<int>(floorf((wx - static_cast<float>(field.originX)) / cell));
             by[i] = static_cast<int>(floorf((wy - static_cast<float>(field.originY)) / cell));
         }
@@ -1853,8 +2160,8 @@ bool GuidedCleanManager::matchField(const LdsScanData& scan, int radiusMM, int a
                 if (score > bestScore) {
                     bestScore = score;
                     bestT = th;
-                    bestX = poseX + static_cast<float>(kx) * cell;
-                    bestY = poseY + static_cast<float>(ky) * cell;
+                    bestX = cX + static_cast<float>(kx) * cell;
+                    bestY = cY + static_cast<float>(ky) * cell;
                 }
             }
         }
@@ -1908,7 +2215,7 @@ bool GuidedCleanManager::matchField(const LdsScanData& scan, int radiusMM, int a
     }
 
     float norm = refined / (static_cast<float>(n) * 255.0f);
-    float before = scoreAt(poseX, poseY, poseTheta) / (static_cast<float>(n) * 255.0f);
+    float before = scoreAt(cX, cY, cT) / (static_cast<float>(n) * 255.0f);
     locScore = norm;
     if (norm < GUIDED_LOC_MIN_SCORE || norm + 0.02f < before) {
         LOG("GUIDED", "Loc: rejected (score %.2f, at odometry pose %.2f)", norm, before);
@@ -1926,12 +2233,13 @@ bool GuidedCleanManager::matchField(const LdsScanData& scan, int radiusMM, int a
                       {"s", String(norm, 2), FIELD_FLOAT},
                       {"s0", String(before, 2), FIELD_FLOAT},
                       {"ok", "true", FIELD_BOOL}});
-    float dx = bestX - poseX;
-    float dy = bestY - poseY;
-    float dt = wrapAngle(bestT - poseTheta);
-    poseX = bestX;
-    poseY = bestY;
-    poseTheta = wrapAngle(bestT);
+    // Apply the correction found at scan time to the current pose
+    float dx = bestX - cX;
+    float dy = bestY - cY;
+    float dt = wrapAngle(bestT - cT);
+    poseX += dx;
+    poseY += dy;
+    poseTheta = wrapAngle(poseTheta + dt);
     locFixes++;
     if (fabsf(dx) + fabsf(dy) > 60.0f || fabsf(dt) > 2.0f * DEG)
         LOG("GUIDED", "Loc: corrected %.0f,%.0f mm %.1f° (score %.2f)", dx, dy, dt / DEG, norm);
@@ -2226,4 +2534,21 @@ void GuidedCleanManager::fetchScan(std::function<void(bool, const LdsScanData&)>
         scanJobOk = ok;
         scanJob = handler;
     });
+}
+
+// On the dock: keep the close-range LIDAR returns (angle, distance, intensity)
+// in the trace. The dock's reflectors should stand out by intensity — data for
+// a LIDAR-guided final approach.
+void GuidedCleanManager::traceDockScan(const LdsScanData& scan) {
+    String pts;
+    pts.reserve(1600);
+    for (int i = 0; i < 360; i++) {
+        const LdsScanPoint& p = scan.points[i];
+        if (p.errorCode != 0 || p.distMM <= 0 || p.distMM > 1200)
+            continue;
+        if (pts.length() > 1500)
+            break;
+        pts += String(p.angleDeg) + ":" + String(p.distMM) + ":" + String(p.intensity) + " ";
+    }
+    tracePose("dockscan", {{"pts", pts, FIELD_STRING}});
 }

@@ -172,6 +172,10 @@ private:
     uint32_t runGen = 0; // Incremented per run/finish; stale serial callbacks compare against it
 
     String buildPlan(const FloorMapData& map, const String& rooms);
+    bool floorFree(float x, float y) const;
+    void addRun(const std::vector<Waypoint>& pts);
+    void buildLanes(const std::vector<const MapZone *>& selected);
+    void planRecorded(const FloorMapData& map, const std::vector<const MapZone *>& selected);
     void freePlan();
 
     // -- Pose (dead reckoning, mm / radians) -------------------------------------
@@ -251,6 +255,14 @@ private:
     int locFixes = 0;
     float locScore = 0.0f;
     void requestLocScan(int radiusMM, int angleDeg, uint8_t resumeStage);
+    void requestLocScanMoving();
+    bool locMovingPending = false;
+    float mcX = 0.0f; // Pose at scan request (centre of the match search)
+    float mcY = 0.0f;
+    float mcT = 0.0f;
+    // Continuous driving
+    bool chaining = false;
+    void chainNext();
     // Deferred scan processing (see fetchScan): keeps big buffers off the loop stack
     LdsScanData scanBuf;
     bool scanJobOk = false;
@@ -299,6 +311,13 @@ private:
     void beginReturn(const String& reason);
     void beginDocking();
     void checkDocked();
+    void onDockMissed();
+    // Robot's own docking after the hand-over: verified for a while
+    unsigned long dockWatchSince = 0;
+    bool dockWatchRetried = false;
+    Ticker dockWatchTicker;
+    bool dockScanPending = false;
+    void traceDockScan(const LdsScanData& scan);
     void finish(Phase result, const String& reason);
     void fail(const String& reason) { finish(Phase::Failed, reason); }
 

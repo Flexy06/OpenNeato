@@ -46,6 +46,7 @@ export interface TraceSummary {
     obstacles: number;
     cleaned: number;
     total: number;
+    docked: boolean | null; // null = unknown (handed over, still being verified)
 }
 
 export interface GuidedTrace {
@@ -110,6 +111,11 @@ export function parseGuidedTrace(text: string): GuidedTrace | null {
         distance += Math.hypot(poses[i].x - poses[i - 1].x, poses[i].y - poses[i - 1].y);
     }
     const ok = fixes.filter((f) => f.ok);
+    const dockResult = [...events].reverse().find((ev) => ev.e === "dock_result");
+    const missed = events.some((ev) => ev.e === "dock_miss");
+    let docked: boolean | null = null;
+    if (dockResult) docked = dockResult.fields.docked === true;
+    else if (end && String(end.e) === "done" && !missed) docked = true;
     return {
         poses,
         fixes,
@@ -128,6 +134,7 @@ export function parseGuidedTrace(text: string): GuidedTrace | null {
             obstacles: events.filter((ev) => ev.e === "obstacle").length,
             cleaned: num(end?.cleaned),
             total: num(end?.total ?? start?.clean),
+            docked,
         },
     };
 }
