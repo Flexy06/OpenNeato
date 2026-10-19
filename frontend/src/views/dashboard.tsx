@@ -42,6 +42,7 @@ interface StatusInfo {
 }
 
 function statusInfo(s: string): StatusInfo {
+    if (s.includes("IDLE") || s.includes("STANDBY")) return { label: "Ready", color: "green", icon: "check" };
     if (s.includes("CLEANINGRUNNING")) return { label: "Cleaning", color: "green", icon: "sparkle" };
     if (s.includes("CLEANINGPAUSED")) return { label: "Paused", color: "amber", icon: "alert" };
     if (s.includes("CLEANINGSUSPENDED")) return { label: "Recharging", color: "amber", icon: "bolt" };
@@ -240,24 +241,6 @@ export function DashboardView({ firmware, state, isManual, updateInfo, robotRead
                     <button
                         type="button"
                         class="header-right-btn"
-                        aria-label={t("Floor Map")}
-                        onClick={() => navigate("/map")}
-                        disabled={!robotReady}
-                    >
-                        <Icon svg={mapSvg} />
-                    </button>
-                    <button
-                        type="button"
-                        class="header-right-btn"
-                        aria-label={t("Cleaning History")}
-                        onClick={() => navigate("/history")}
-                        disabled={!robotReady}
-                    >
-                        <Icon svg={historySvg} />
-                    </button>
-                    <button
-                        type="button"
-                        class="header-right-btn"
                         aria-label={t("Settings")}
                         onClick={() => navigate("/settings")}
                     >
@@ -265,6 +248,129 @@ export function DashboardView({ firmware, state, isManual, updateInfo, robotRead
                     </button>
                 </div>
             </div>
+
+            {/* Update notification */}
+            {updateInfo && (
+                <a class="update-banner" href={updateInfo.url} target="_blank" rel="noopener noreferrer">
+                    <Icon svg={tagSvg} />
+                    {t("Update available: v{version} - tap to view release", { version: updateInfo.version })}
+                </a>
+            )}
+
+            {/* Robot error/warning — fixed, clears automatically when robot resolves it */}
+            {robotError && (
+                <ErrorBanner title={t(robotError.title)} message={robotError.message} variant={robotError.kind} />
+            )}
+            {!error.data && error.error && !connErr && <ErrorBanner title={t("Warning")} message={error.error} />}
+
+            {/* Action errors — dismissible, stackable */}
+            <ErrorBannerStack errors={actionErrors} />
+
+            {/* Hero area — robot right, cards left */}
+            {!robotReady ? (
+                <div class="hero-area gate-hero">
+                    <div class="robot-float gate-robot">
+                        <Icon svg={robotSvg} />
+                    </div>
+                    {identifying ? (
+                        <ConnectionDiag />
+                    ) : (
+                        <div class="gate-message">
+                            <Icon svg={alertSvg} />
+                            <h2>
+                                <T>Unsupported Robot</T>
+                            </h2>
+                            <p>
+                                <T>OpenNeato requires a Neato Botvac D3, D4, D5, D6, or D7.</T>
+                                <br />
+                                <T>The connected robot could not be identified.</T>
+                            </p>
+                        </div>
+                    )}
+                </div>
+            ) : offline ? (
+                <div class="conn-error">
+                    <Icon svg={wifiOffSvg} />
+                    <T>Unable to reach robot</T>
+                </div>
+            ) : (
+                <div class="dash">
+                    {/* Hero: the robot and what it is doing now */}
+                    <section class="dash-hero" aria-live="polite">
+                        <div class="dash-hero-robot">
+                            <Icon svg={robotSvg} />
+                        </div>
+                        <div class="dash-hero-info">
+                            <div class="dash-eyebrow">
+                                <T>Status</T>
+                            </div>
+                            <div class={`dash-status ${si.color}`}>
+                                <span class="dash-status-icon">
+                                    <Icon svg={STATUS_ICONS[si.icon]} />
+                                </span>
+                                {t(si.label)}
+                            </div>
+                            <div class="dash-meta">
+                                <span class={`dash-chip ${mi.color}`}>
+                                    <Icon svg={MODE_ICONS[mi.icon]} />
+                                    {t(mi.label)}
+                                </span>
+                                <span
+                                    class={`dash-chip ${charger.error && !charger.data ? "red" : bc}`}
+                                    title={t("Battery")}
+                                >
+                                    {charger.error && !charger.data ? (
+                                        <Icon svg={alertSvg} />
+                                    ) : (
+                                        <BatteryIcon pct={pct} />
+                                    )}
+                                    {charger.data ? `${pct}%` : charger.error ? t("Error") : "..."}
+                                </span>
+                            </div>
+                        </div>
+                    </section>
+
+                    {/* Secondary: next scheduled clean */}
+                    {schedule.data?.enabled && (
+                        <div class="schedule-banner">
+                            <button type="button" class="schedule-banner-main" onClick={() => navigate("/schedule")}>
+                                <Icon svg={clockSvg} />
+                                <span>
+                                    {nextSchedule
+                                        ? t("Next clean: {time}", { time: nextSchedule })
+                                        : t("Schedule enabled - tap to view")}
+                                </span>
+                            </button>
+                            {schedule.data.next && (
+                                <button
+                                    type="button"
+                                    class={`schedule-skip-btn${skipPending ? " pending" : ""}`}
+                                    onClick={handleSkipNextClean}
+                                    disabled={skipPending}
+                                >
+                                    {t(skipNextClean ? "Cancel skip" : "Skip clean")}
+                                </button>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Shortcuts */}
+                    <nav class="dash-quick" aria-label={t("Shortcuts")}>
+                        <button type="button" class="dash-quick-btn" onClick={() => navigate("/map")}>
+                            <Icon svg={mapSvg} />
+                            <span>{t("Floor Map")}</span>
+                        </button>
+                        <button type="button" class="dash-quick-btn" onClick={() => navigate("/history")}>
+                            <Icon svg={historySvg} />
+                            <span>{t("Cleaning History")}</span>
+                        </button>
+                        <button type="button" class="dash-quick-btn" onClick={() => navigate("/schedule")}>
+                            <Icon svg={clockSvg} />
+                            <span>{t("Schedule")}</span>
+                        </button>
+                    </nav>
+                </div>
+            )}
 
             {/* Status bar */}
             {system.data && !offline && (
@@ -307,121 +413,6 @@ export function DashboardView({ firmware, state, isManual, updateInfo, robotRead
                             </div>
                         </div>
                     )}
-                </div>
-            )}
-
-            {/* Update notification */}
-            {updateInfo && (
-                <a class="update-banner" href={updateInfo.url} target="_blank" rel="noopener noreferrer">
-                    <Icon svg={tagSvg} />
-                    {t("Update available: v{version} - tap to view release", { version: updateInfo.version })}
-                </a>
-            )}
-
-            {/* Robot error/warning — fixed, clears automatically when robot resolves it */}
-            {robotError && (
-                <ErrorBanner title={t(robotError.title)} message={robotError.message} variant={robotError.kind} />
-            )}
-            {!error.data && error.error && !connErr && <ErrorBanner title={t("Warning")} message={error.error} />}
-
-            {/* Action errors — dismissible, stackable */}
-            <ErrorBannerStack errors={actionErrors} />
-
-            {schedule.data?.enabled && (
-                <div class="schedule-banner">
-                    <button type="button" class="schedule-banner-main" onClick={() => navigate("/schedule")}>
-                        <Icon svg={clockSvg} />
-                        <span>
-                            {nextSchedule
-                                ? t("Next clean: {time}", { time: nextSchedule })
-                                : t("Schedule enabled - tap to view")}
-                        </span>
-                    </button>
-                    {schedule.data.next && (
-                        <button
-                            type="button"
-                            class={`schedule-skip-btn${skipPending ? " pending" : ""}`}
-                            onClick={handleSkipNextClean}
-                            disabled={skipPending}
-                        >
-                            {t(skipNextClean ? "Cancel skip" : "Skip clean")}
-                        </button>
-                    )}
-                </div>
-            )}
-
-            {/* Hero area — robot right, cards left */}
-            {!robotReady ? (
-                <div class="hero-area gate-hero">
-                    <div class="robot-float gate-robot">
-                        <Icon svg={robotSvg} />
-                    </div>
-                    {identifying ? (
-                        <ConnectionDiag />
-                    ) : (
-                        <div class="gate-message">
-                            <Icon svg={alertSvg} />
-                            <h2>
-                                <T>Unsupported Robot</T>
-                            </h2>
-                            <p>
-                                <T>OpenNeato requires a Neato Botvac D3, D4, D5, D6, or D7.</T>
-                                <br />
-                                <T>The connected robot could not be identified.</T>
-                            </p>
-                        </div>
-                    )}
-                </div>
-            ) : offline ? (
-                <div class="conn-error">
-                    <Icon svg={wifiOffSvg} />
-                    <T>Unable to reach robot</T>
-                </div>
-            ) : (
-                <div class="hero-area">
-                    <div class="robot-float">
-                        <Icon svg={robotSvg} />
-                    </div>
-
-                    <div class="info-cards">
-                        <div class="info-card">
-                            <div class="info-card-left">
-                                <div class="info-card-label">
-                                    <T>Status</T>
-                                </div>
-                                <div class={`info-card-value ${si.color}`}>{t(si.label)}</div>
-                            </div>
-                            <div class={`info-card-icon ${si.color}`}>
-                                <Icon svg={STATUS_ICONS[si.icon]} />
-                            </div>
-                        </div>
-
-                        <div class="info-card">
-                            <div class="info-card-left">
-                                <div class="info-card-label">
-                                    <T>Battery</T>
-                                </div>
-                                <div class={`info-card-value ${bc}`}>
-                                    {charger.data ? `${pct}%` : charger.error ? "Error" : "..."}
-                                </div>
-                            </div>
-                            <div class={`info-card-icon ${charger.error && !charger.data ? "red" : ""}`}>
-                                {charger.error && !charger.data ? <Icon svg={alertSvg} /> : <BatteryIcon pct={pct} />}
-                            </div>
-                        </div>
-
-                        <div class="info-card">
-                            <div class="info-card-left">
-                                <div class="info-card-label">
-                                    <T>Mode</T>
-                                </div>
-                                <div class={`info-card-value ${mi.color}`}>{t(mi.label)}</div>
-                            </div>
-                            <div class={`info-card-icon ${mi.color}`}>
-                                <Icon svg={MODE_ICONS[mi.icon]} />
-                            </div>
-                        </div>
-                    </div>
                 </div>
             )}
 

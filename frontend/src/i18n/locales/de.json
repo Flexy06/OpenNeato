@@ -533,5 +533,6 @@
   "The cleaning history could not be read. Download the diagnostics and send them, they contain the raw answer of the ESP32.": "Der Reinigungsverlauf konnte nicht gelesen werden. Lade die Diagnose herunter und schick sie mir, sie enthält die Rohantwort des ESP32.",
   "Back on the dock.": "Wieder an der Ladestation.",
   "Did not reach the dock: put it on the dock by hand.": "Ladestation nicht erreicht: bitte von Hand auf die Station stellen.",
-  "Docking was handed over to the robot.": "Das Andocken wurde an den Roboter übergeben."
+  "Docking was handed over to the robot.": "Das Andocken wurde an den Roboter übergeben.",
+  "Shortcuts": "Schnellzugriff"
 }

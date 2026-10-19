@@ -199,7 +199,7 @@ export function LidarMap({ scan, size, moving }: LidarMapProps) {
             const smoothed = smooth(seg);
             const avgAge = seg.reduce((s, p) => s + p.age, 0) / seg.length;
             const alpha = opacity(avgAge) * 0.7;
-            ctx.strokeStyle = `rgba(59, 158, 255, ${alpha})`;
+            ctx.strokeStyle = `rgba(124, 180, 150, ${alpha})`;
             ctx.beginPath();
             const [sx, sy] = toCanvas(smoothed[0].angle, smoothed[0].dist);
             ctx.moveTo(sx, sy);

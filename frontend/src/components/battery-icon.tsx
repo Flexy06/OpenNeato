@@ -13,7 +13,8 @@ export function BatteryIcon({ pct }: BatteryIconProps) {
     const fillRight = 8 + fillWidth;
 
     // Color the fill based on charge level
-    const fillColor = pct <= 25 ? "var(--red)" : pct <= 50 ? "var(--amber)" : pct <= 75 ? "#8fdf3f" : "var(--green)";
+    const fillColor =
+        pct <= 25 ? "var(--red)" : pct <= 50 ? "var(--amber)" : pct <= 75 ? "var(--teal)" : "var(--green)";
 
     return (
         <svg

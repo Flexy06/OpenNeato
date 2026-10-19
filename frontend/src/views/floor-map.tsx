@@ -175,6 +175,8 @@ export function FloorMapView({ state, robotReady }: FloorMapViewProps) {
         setCanvasEl(el);
     }, []);
     const viewRef = useRef<MapView>({ cx: 0, cy: 0, scale: 40, rot: rotation });
+    // Set once the user zooms or pans; until then size changes refit the map
+    const userMoved = useRef(false);
     const [view, setView] = useState<MapView>(viewRef.current);
     const screen = (): Screen => ({
         w: canvasRef.current?.clientWidth ?? 300,
@@ -187,11 +189,13 @@ export function FloorMapView({ state, robotReady }: FloorMapViewProps) {
         if (!box) return;
         const v = fitView(box, screen(), rotation);
         viewRef.current = v;
+        userMoved.current = false;
         setView(v);
     }, [map, rotation, loc]);
 
     // Fit once when a map first appears (and on rotation changes)
     const fittedFor = useRef<string | null>(null);
+
     useEffect(() => {
         if (!map || picking || !canvasEl) return;
         const key = `${map.source}:${rotation}`;
@@ -236,19 +240,31 @@ export function FloorMapView({ state, robotReady }: FloorMapViewProps) {
     useEffect(() => {
         const onResize = () => redraw();
         window.addEventListener("resize", onResize);
-        // The map takes the height left over by the panel below; redraw when it changes
-        const ro = canvasEl && typeof ResizeObserver !== "undefined" ? new ResizeObserver(onResize) : null;
+        // The map takes the height left over by the panel below: refit while the
+        // user has not zoomed or panned yet, otherwise just redraw
+        let lastH = canvasEl?.clientHeight ?? 0;
+        const onBox = () => {
+            const h = canvasEl?.clientHeight ?? 0;
+            if (Math.abs(h - lastH) > 4 && !userMoved.current) fit();
+            lastH = h;
+            redraw();
+        };
+        const ro = canvasEl && typeof ResizeObserver !== "undefined" ? new ResizeObserver(onBox) : null;
         if (ro && canvasEl) ro.observe(canvasEl);
         return () => {
             window.removeEventListener("resize", onResize);
             ro?.disconnect();
         };
-    }, [redraw, canvasEl]);
+    }, [redraw, canvasEl, fit]);
 
     // -- Editing gestures ----------------------------------------------------------------
     const dragRef = useRef<{ kind: "draw" | "vertex" | "move"; last: MapVertex; vertex: number } | null>(null);
 
-    useEditorGestures(canvasEl, viewRef, setView, {
+    const setViewByUser = useCallback((v: MapView) => {
+        userMoved.current = true;
+        setView(v);
+    }, []);
+    useEditorGestures(canvasEl, viewRef, setViewByUser, {
         onTap: (w) => {
             if (!map) return;
             if (tab === "clean") {

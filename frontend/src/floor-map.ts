@@ -37,7 +37,8 @@ const MIN_POINT_SPACING_M = 0.1;
 const POINTS_PER_LINE = 60;
 
 // Distinct, theme-neutral room tints (index = room id modulo length)
-export const ROOM_COLORS = ["#3b9eff", "#bf5af2", "#30d5c8", "#e5972a", "#ff6b9d", "#5ac8fa", "#34c759", "#f9ebb2"];
+// Distinct but muted hues that sit on the warm palette (red is reserved for no-go zones)
+export const ROOM_COLORS = ["#4f8fb0", "#c08a3e", "#5e9c82", "#8c6fae", "#4fa3a0", "#a8775a", "#7e9b4e", "#a35d7a"];
 
 export function roomColor(id: number): string {
     return ROOM_COLORS[(id - 1 + ROOM_COLORS.length) % ROOM_COLORS.length];

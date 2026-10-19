@@ -533,5 +533,6 @@
   "The cleaning history could not be read. Download the diagnostics and send them, they contain the raw answer of the ESP32.": "Non è stato possibile leggere la cronologia delle pulizie. Scarica la diagnostica e inviala, contiene la risposta grezza dell'ESP32.",
   "Back on the dock.": "Di nuovo sulla base.",
   "Did not reach the dock: put it on the dock by hand.": "Base non raggiunta: rimetti il robot sulla base a mano.",
-  "Docking was handed over to the robot.": "L'aggancio alla base è stato affidato al robot."
+  "Docking was handed over to the robot.": "L'aggancio alla base è stato affidato al robot.",
+  "Shortcuts": "Scorciatoie"
 }

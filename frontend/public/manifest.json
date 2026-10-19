@@ -4,8 +4,8 @@
     "description": "Open-source local control for Neato Botvac robots",
     "start_url": "/",
     "display": "standalone",
-    "background_color": "#161618",
-    "theme_color": "#161618",
+    "background_color": "#131714",
+    "theme_color": "#131714",
     "icons": [
         {
             "src": "/icon-192.png",

@@ -106,13 +106,13 @@ function palette(canvas: HTMLCanvasElement): Palette {
     return {
         surface,
         grid: dark ? "rgba(255, 255, 255, 0.04)" : "rgba(0, 0, 0, 0.06)",
-        coverage: dark ? "rgba(52, 199, 89, 0.13)" : "rgba(22, 130, 50, 0.16)",
-        path: dark ? "rgba(249, 235, 178, 0.35)" : "rgba(180, 140, 40, 0.35)",
+        coverage: dark ? "rgba(124, 199, 156, 0.12)" : "rgba(36, 77, 67, 0.12)",
+        path: dark ? "rgba(222, 205, 160, 0.35)" : "rgba(150, 120, 60, 0.35)",
         text: v("--text", "#f0f0f2"),
         textDim: v("--text-dim", "#8a8a8e"),
         red: v("--red", "#ff453a"),
         green: v("--green", "#34c759"),
-        blue: v("--blue", "#3b9eff"),
+        blue: v("--accent", "#9cc8b2"),
         accent: v("--accent", "#f9ebb2"),
         dark,
     };
@@ -217,7 +217,7 @@ function wallImage(loc: LocMap, color: string): HTMLCanvasElement {
 function drawWalls(ctx: CanvasRenderingContext2D, st: RenderState, s: Screen, pal: Palette, dpr: number) {
     const loc = st.loc;
     if (!loc) return;
-    const img = wallImage(loc, pal.dark ? "#c9cee3" : "#3a3f55");
+    const img = wallImage(loc, pal.dark ? "#d6d0c4" : "#4a4e4a");
     const r = (st.view.rot * Math.PI) / 180;
     const k = loc.cell / 1000;
     const S = st.view.scale;

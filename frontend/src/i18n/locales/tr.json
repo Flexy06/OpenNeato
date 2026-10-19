@@ -533,5 +533,6 @@
   "The cleaning history could not be read. Download the diagnostics and send them, they contain the raw answer of the ESP32.": "Temizlik geçmişi okunamadı. Tanılamayı indirip gönderin, ESP32'nin ham yanıtını içerir.",
   "Back on the dock.": "İstasyona geri döndü.",
   "Did not reach the dock: put it on the dock by hand.": "İstasyona ulaşamadı: robotu elle istasyona koyun.",
-  "Docking was handed over to the robot.": "Yanaşma robota devredildi."
+  "Docking was handed over to the robot.": "Yanaşma robota devredildi.",
+  "Shortcuts": "Kısayollar"
 }
