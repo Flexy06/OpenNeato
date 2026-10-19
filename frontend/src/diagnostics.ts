@@ -1,7 +1,7 @@
 // Diagnostics bundle: one JSON file with everything needed to analyse a
 // connection or cleaning problem (identification + serial link state, system,
-// robot state, guided status + trace of the last room clean, floor map, recent
-// logs). Settings are left out on purpose (they hold WiFi / notification secrets).
+// robot state, guided status + trace of the last room clean, floor map and its
+// LIDAR field, recent logs). Settings are left out on purpose (they hold WiFi / notification secrets).
 
 const TIMEOUT_MS = 8000;
 const MAX_LOG_BYTES = 200_000;
@@ -19,6 +19,26 @@ async function grab(url: string, asText = false): Promise<unknown> {
         } catch {
             return body;
         }
+    } catch (e) {
+        return { error: e instanceof Error ? e.message : String(e) };
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+// Binary (LIDAR map field) as base64: lets the run be replayed against the real map
+async function grabBase64(url: string): Promise<unknown> {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+    try {
+        const res = await fetch(url, { signal: ctrl.signal });
+        if (!res.ok) return { error: `${res.status}` };
+        const bytes = new Uint8Array(await res.arrayBuffer());
+        let bin = "";
+        for (let i = 0; i < bytes.length; i += 0x8000) {
+            bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        }
+        return btoa(bin);
     } catch (e) {
         return { error: e instanceof Error ? e.message : String(e) };
     } finally {
@@ -49,6 +69,7 @@ export async function collectDiagnostics(): Promise<Record<string, unknown>> {
     for (const [key, url] of json) out[key] = await grab(url);
     out.guidedTrace = await grab("/api/guided/trace", true);
     out.floorMap = await grab("/api/floormap", true);
+    out.locField = await grabBase64("/api/floormap/field");
 
     // Newest log file (names sort chronologically)
     const logs = out.logs;

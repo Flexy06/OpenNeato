@@ -193,17 +193,62 @@ bool FloorMap::remove() {
     SPIFFS.remove(FLOORMAP_FILE);
     if (SPIFFS.exists(FLOORMAP_FIELD_FILE))
         SPIFFS.remove(FLOORMAP_FIELD_FILE);
+    removeDock();
     dataLogger.logGuided("map_deleted");
     LOG("MAP", "Floor map deleted");
     return true;
 }
 
 bool FloorMap::removeField() {
+    removeDock();
     if (!SPIFFS.exists(FLOORMAP_FIELD_FILE))
         return false;
     SPIFFS.remove(FLOORMAP_FIELD_FILE);
     LOG("MAP", "Localization field deleted");
     return true;
+}
+
+bool FloorMap::loadDock(float& x, float& y, float& t, int& runs) const {
+    File f = SPIFFS.open(FLOORMAP_DOCK_FILE, FILE_READ);
+    if (!f)
+        return false;
+    String line = f.readStringUntil('\n');
+    f.close();
+    // "D <x mm> <y mm> <theta mrad> <runs>"
+    if (!line.startsWith("D "))
+        return false;
+    long v[4] = {0, 0, 0, 0};
+    int idx = 0;
+    int pos = 2;
+    while (idx < 4 && pos < static_cast<int>(line.length())) {
+        int sp = line.indexOf(' ', pos);
+        String tok = sp < 0 ? line.substring(pos) : line.substring(pos, sp);
+        v[idx++] = tok.toInt();
+        if (sp < 0)
+            break;
+        pos = sp + 1;
+    }
+    if (idx < 3)
+        return false;
+    x = static_cast<float>(v[0]);
+    y = static_cast<float>(v[1]);
+    t = static_cast<float>(v[2]) / 1000.0f;
+    runs = idx >= 4 ? static_cast<int>(v[3]) : 1;
+    return true;
+}
+
+void FloorMap::saveDock(float x, float y, float t, int runs) {
+    File f = SPIFFS.open(FLOORMAP_DOCK_FILE, FILE_WRITE);
+    if (!f)
+        return;
+    f.print("D " + String(static_cast<long>(x)) + " " + String(static_cast<long>(y)) + " " +
+            String(static_cast<long>(t * 1000.0f)) + " " + String(runs) + "\n");
+    f.close();
+}
+
+void FloorMap::removeDock() {
+    if (SPIFFS.exists(FLOORMAP_DOCK_FILE))
+        SPIFFS.remove(FLOORMAP_DOCK_FILE);
 }
 
 // -- Upload ---------------------------------------------------------------------
@@ -269,6 +314,7 @@ bool FloorMap::endUpload() {
             SPIFFS.remove(FLOORMAP_FIELD_TMP_FILE);
             return false;
         }
+        removeDock(); // New field = new coordinate frame: the dock pose is learned again
         LOG("MAP", "Localization field saved (%dx%d @%dmm)", field.w, field.h, field.cell);
         dataLogger.logGuided("field_saved", {{"w", String(field.w), FIELD_INT},
                                              {"h", String(field.h), FIELD_INT},

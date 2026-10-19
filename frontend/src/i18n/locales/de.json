@@ -536,5 +536,17 @@
   "Docking was handed over to the robot.": "Das Andocken wurde an den Roboter übergeben.",
   "Shortcuts": "Schnellzugriff",
   "The LIDAR wall map could not be loaded (not enough memory). The robot drives on odometry only.": "Die LIDAR-Wandkarte konnte nicht geladen werden (zu wenig Speicher). Der Roboter fährt nur nach Radumdrehungen.",
-  "No LIDAR wall map: the robot drives on odometry only and its position drifts. Pin a mapping run (badge LIDAR map) under Edit, Use another cleaning run.": "Keine LIDAR-Wandkarte: Der Roboter fährt nur nach Radumdrehungen, seine Position driftet. Lege unter Bearbeiten → „Anderen Durchgang verwenden“ eine Kartierungsfahrt mit dem Abzeichen „LIDAR-Karte“ fest."
+  "No LIDAR wall map: the robot drives on odometry only and its position drifts. Pin a mapping run (badge LIDAR map) under Edit, Use another cleaning run.": "Keine LIDAR-Wandkarte: Der Roboter fährt nur nach Radumdrehungen, seine Position driftet. Lege unter Bearbeiten → „Anderen Durchgang verwenden“ eine Kartierungsfahrt mit dem Abzeichen „LIDAR-Karte“ fest.",
+  "Localizing...": "Ortet sich...",
+  "start the robot on its dock": "Starte den Roboter auf der Ladestation",
+  "no LIDAR map: pin a mapping run first": "keine LIDAR-Karte: zuerst eine Kartierungsfahrt anpinnen",
+  "the LIDAR map could not be loaded (not enough memory) - restart the ESP32": "die LIDAR-Karte konnte nicht geladen werden (zu wenig Speicher) - ESP32 neu starten",
+  "the LIDAR delivers no usable scans (is the turret spinning?)": "der LIDAR liefert keine brauchbaren Scans (dreht sich der Turm?)",
+  "position not found on the map - record a new mapping run": "Position im Grundriss nicht gefunden - neue Kartierungsfahrt aufnehmen",
+  "lost: the position no longer matches the map": "verirrt: die Position passt nicht mehr zum Grundriss",
+  "docking handed over to the robot": "Andocken an den Roboter übergeben",
+  "way home blocked - the robot docks itself": "Weg nach Hause blockiert - der Roboter dockt selbst an",
+  "a room clean is running": "eine Raumreinigung läuft",
+  "run took far too long": "Durchgang hat viel zu lange gedauert",
+  "Map lock {score}% · ±{mm} mm": "Kartenabgleich {score}% · ±{mm} mm"
 }

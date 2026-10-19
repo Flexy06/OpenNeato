@@ -1,4 +1,5 @@
 #include "web_server.h"
+#include <memory>
 #include "web_assets.h"
 #include "neato_serial.h"
 #include "data_logger.h"
@@ -106,7 +107,50 @@ void WebServer::registerApiRoutes() {
     // All parameterized actions use query strings: resource URL identifies the
     // command, query params carry arguments (mirrors Neato serial protocol).
 
-    registerPostRoute("/api/clean", neato, &NeatoSerial::clean, {"action"});
+    // POST /api/clean — while a room clean drives the robot (TestMode), the robot
+    // ignores its own commands: "dock" and "stop"/"pause" go to the room clean instead
+    server.on("/api/clean", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        lastApiActivity = millis();
+        String action = detail::paramRaw(request, "action");
+        if (guidedMgr.isActive()) {
+            String err;
+            if (action == "dock")
+                err = guidedMgr.command("home", "");
+            else if (action == "stop" || action == "pause")
+                err = guidedMgr.command("stop", "");
+            else
+                err = "a room clean is running";
+            int code = err.isEmpty() ? 200 : 409;
+            logger.logRequest(HTTP_POST, "/api/clean", code, 0);
+            if (err.isEmpty())
+                sendOk(request);
+            else
+                sendError(request, code, err);
+            return;
+        }
+        unsigned long startMs = lastApiActivity;
+        auto weak = request->pause();
+        auto answered = std::make_shared<bool>(false);
+        auto cb = [this, weak, startMs, answered](bool ok) {
+            if (*answered)
+                return;
+            *answered = true;
+            if (auto req = weak.lock()) {
+                unsigned long elapsed = millis() - startMs;
+                logger.logRequest(HTTP_POST, "/api/clean", ok ? 200 : 504, elapsed);
+                if (ok)
+                    sendOk(req.get());
+                else
+                    sendError(req.get(), 504, "timeout");
+            }
+        };
+        if (!neato.clean(action, cb) && !*answered) {
+            *answered = true;
+            logger.logRequest(HTTP_POST, "/api/clean", 503, 0);
+            if (auto req = weak.lock())
+                sendError(req.get(), 503, "unavailable");
+        }
+    });
     registerPostRoute("/api/sound", neato, &NeatoSerial::playSound, {"id"});
     registerPostRoute("/api/power", neato, &NeatoSerial::powerControl, {"action"});
     registerPostRoute("/api/lidar/rotate", neato, &NeatoSerial::setLdsRotation, {"enable"});

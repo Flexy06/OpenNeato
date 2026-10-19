@@ -536,5 +536,17 @@
   "Docking was handed over to the robot.": "L'aggancio alla base è stato affidato al robot.",
   "Shortcuts": "Scorciatoie",
   "The LIDAR wall map could not be loaded (not enough memory). The robot drives on odometry only.": "Non è stato possibile caricare la mappa LIDAR delle pareti (memoria insufficiente). Il robot si orienta solo con l'odometria.",
-  "No LIDAR wall map: the robot drives on odometry only and its position drifts. Pin a mapping run (badge LIDAR map) under Edit, Use another cleaning run.": "Nessuna mappa LIDAR: il robot si orienta solo con l'odometria e la posizione deriva. Scegli una mappatura (badge Mappa LIDAR) in Modifica, Usa un altro passaggio."
+  "No LIDAR wall map: the robot drives on odometry only and its position drifts. Pin a mapping run (badge LIDAR map) under Edit, Use another cleaning run.": "Nessuna mappa LIDAR: il robot si orienta solo con l'odometria e la posizione deriva. Scegli una mappatura (badge Mappa LIDAR) in Modifica, Usa un altro passaggio.",
+  "Localizing...": "Localizzazione...",
+  "start the robot on its dock": "Avvia il robot sulla base",
+  "no LIDAR map: pin a mapping run first": "nessuna mappa LIDAR: fissa prima un passaggio di mappatura",
+  "the LIDAR map could not be loaded (not enough memory) - restart the ESP32": "impossibile caricare la mappa LIDAR (memoria insufficiente) - riavvia l’ESP32",
+  "the LIDAR delivers no usable scans (is the turret spinning?)": "il LIDAR non fornisce scansioni utilizzabili (la torretta gira?)",
+  "position not found on the map - record a new mapping run": "posizione non trovata sulla mappa - registra un nuovo passaggio di mappatura",
+  "lost: the position no longer matches the map": "perso: la posizione non corrisponde più alla mappa",
+  "docking handed over to the robot": "aggancio affidato al robot",
+  "way home blocked - the robot docks itself": "strada di casa bloccata - il robot si aggancia da solo",
+  "a room clean is running": "è in corso una pulizia della stanza",
+  "run took far too long": "il passaggio è durato troppo",
+  "Map lock {score}% · ±{mm} mm": "Allineamento mappa {score}% · ±{mm} mm"
 }

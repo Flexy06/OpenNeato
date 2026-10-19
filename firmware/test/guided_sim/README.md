@@ -14,33 +14,35 @@ fakes in `fake/` (Arduino `String`, SPIFFS on the host filesystem, and a
 
 The fake `NeatoSerial` simulates:
 
-- a differential-drive robot with a 0.4% right-wheel slip (heading drift),
-- serial latency (every callback deferred by 60 ms),
-- walls, unrecorded obstacles (bumper + wheel stall), a cliff region (drop sensors),
-- the dock (contacts detected when the robot sits on the origin facing +x),
-- a ray-cast LIDAR (CCW or CW angle convention, optional mounting offset),
+- a differential-drive robot with systematic and per-move random wheel slip,
+  a carpet (extra slip, heading kicks at its edge),
+- serial latency (60 ms, LIDAR scans 700 ms), failed answers (2%) and,
+  per scenario, lost answers and a serial outage (watchdog tests),
+- walls, mapped furniture (cabinet, table legs), unmapped chairs, a cliff region,
+- the dock (contacts only when the robot sits within ~2 cm / 6° of the docked pose),
+- a ray-cast LIDAR with noise and spurious short returns (CCW or CW, optional mounting offset),
 - battery drain.
 
-Before each scenario a likelihood field is rasterized from the world walls and
-uploaded, as the frontend does after a mapping run (unless the scenario disables it).
+Before each scenario a likelihood field is rasterized from the world (walls
+smeared sideways like a real mapping run) and uploaded.
 
-Scenarios (two rooms joined by a door, one no-go zone in room 2):
+```bash
+./run.sh x basic|robust|flat     # one scenario group
+SIM_SEED=7 ./run.sh              # other random seed
+SIM_TRAJ_DIR=/tmp/t GUIDED_SIM_TRACE_DIR=/tmp/t ./run.sh   # true path CSV + run traces
+SIM_DEBUG=1 ./run.sh             # print every contact with walls/furniture
+```
 
-| Scenario                  | Checks                                                  |
-|---------------------------|---------------------------------------------------------|
-| room 2 with no-go         | completes, docks, never enters the no-go, coverage >80% |
-| chair in the way          | detours an unrecorded obstacle, docks                   |
-| low battery               | returns early, docks                                    |
-| battery too low / not docked | refuses to start                                     |
-| cliff in room 2           | backs off drops, completes                              |
-| clockwise LIDAR           | compass direction auto-calibration                      |
-| no compass, low drift     | odometry-only fallback                                  |
-| lidar offset + furniture  | compass + dock ICP with an off-centre turret            |
-| room 1 only               | recording detours via room 2 — robot must not follow it |
-| heavy drift with map      | 2% wheel slip + wrong wheel base, corrected by map matching |
-| no map field              | compass fallback without a localization field           |
-| map origin off the dock   | recording origin ≠ dock: docking uses the measured dock pose |
+Groups:
 
-The model is deliberately simple (no wheel inertia, perfect encoders apart from
-slip, no carpet). Passing it means the control logic is consistent; it does not
-replace testing on a robot.
+- **basic** (two rooms, 1 m door, no-go zone): coverage, unmapped chair, low battery,
+  refusals, cliff, CW LIDAR, heavy drift, LIDAR offset, map origin off the dock,
+  LIDAR that never delivers.
+- **robust**: serial outage (must abort and leave TestMode), lost answers, "home" and
+  "stop" mid-run, robot shoved 40 cm / 25° (re-localization), very smeared map.
+- **flat** (hallway with the dock next to a cabinet, 80 cm door, living room with
+  table legs, sofa, carpet, chairs): both rooms, then 10 runs in a row on the same
+  map without recalibration.
+
+Passing it means the control logic is consistent and robust against these
+effects; it does not replace testing on a robot.

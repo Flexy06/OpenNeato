@@ -1571,6 +1571,7 @@ components:
           enum:
             - idle
             - starting
+            - localizing
             - running
             - returning
             - docking
@@ -1644,6 +1645,12 @@ components:
         locScore:
           type: number
           description: Last map match score (0..1)
+        locSpread:
+          type: integer
+          description: Particle filter position spread (1 sigma, mm)
+        waiting:
+          type: string
+          description: What the controller is currently waiting for ("" = nothing)
         targetX:
           type: number
           description: Current target waypoint (only while active)

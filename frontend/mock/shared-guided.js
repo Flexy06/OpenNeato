@@ -209,13 +209,19 @@ function guidedStatus(state, hasMap, now) {
         message: "",
         compass: "off",
         compassFixes: 0,
+        localization: state.floorField ? "map" : "odometry",
+        locFixes: 0,
+        locScore: 0,
+        locSpread: 0,
+        waiting: "",
     };
     if (!g) return base;
     if (g.final) return { ...base, ...g.final, hasMap };
     const t = (now - g.startMs) / 1000;
     const pose = poseAt(g, t);
     let phase = "running";
-    if (t < START_S) phase = "starting";
+    if (t < START_S / 2) phase = "starting";
+    else if (t < START_S) phase = "localizing";
     else if (t >= g.returnEnd + DOCK_S) phase = "done";
     else if (t >= g.returnEnd) phase = "docking";
     else if (pose.seg?.phase === "returning") phase = "returning";
@@ -237,8 +243,10 @@ function guidedStatus(state, hasMap, now) {
         elapsed: Math.floor(t),
         startedAt: g.startedAt,
         message: g.message,
-        compass: t < START_S ? "pending" : "locked",
-        compassFixes: Math.floor(t / 5),
+        locFixes: Math.floor(t / 4),
+        locScore: 0.9,
+        locSpread: 45,
+        waiting: "scan",
     };
     if (pose.seg && status.active) {
         status.targetX = pose.seg.b[0];

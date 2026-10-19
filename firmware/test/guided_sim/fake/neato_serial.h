@@ -28,6 +28,18 @@ public:
     double fuel = 90;
     double drainPerMin = 0.5; // % per minute while in TestMode
     int ldsSign = 1; // +1: LDS angles CCW (ROS convention), -1: CW
+    // Realism knobs
+    double moveNoise = 0.01; // Per-move random wheel slip (1σ, fraction)
+    double failRate = 0.02; // Share of answers that come back as failed (timeouts)
+    double dropRate = 0.0; // Share of answers that never come (exercises the watchdogs)
+    unsigned long outageFrom = 0, outageUntil = 0; // No answers at all in this window
+    double spuriousRate = 0.04; // Share of LIDAR points hitting something unmapped (legs, cables)
+    unsigned long scanLatency = 700; // GetLDSScan round trip at 115200 baud
+    double carpetX0 = 1e9, carpetY0 = 0, carpetX1 = 0, carpetY1 = 0; // Extra slip + heading kicks here
+    unsigned rngState = 12345;
+    double rnd() { rngState = rngState * 1103515245u + 12345u; return ((rngState >> 8) & 0xFFFF) / 65536.0; }
+    double gauss() { return (rnd() + rnd() + rnd() + rnd() - 2.0) * 1.7320508; }
+    double moveSlipL = 1.0, moveSlipR = 1.0;
     double ldsOffset = 0; // LIDAR turret position along the heading (mm, negative = behind centre)
     bool ldsOn = false;
     int scans = 0;
@@ -46,7 +58,17 @@ public:
     struct Ev { unsigned long at; std::function<void()> fn; };
     std::vector<Ev> evs;
     unsigned long lat = 60;
-    void later(std::function<void()> fn) { evs.push_back({millis() + lat, std::move(fn)}); }
+    bool answerLost() {
+        unsigned long now = millis();
+        if (now >= outageFrom && now < outageUntil) return true;
+        return dropRate > 0 && rnd() < dropRate;
+    }
+    void laterIn(unsigned long ms, std::function<void()> fn) {
+        if (answerLost()) return;
+        evs.push_back({millis() + ms, std::move(fn)});
+    }
+    void later(std::function<void()> fn) { laterIn(lat, std::move(fn)); }
+    bool failNow() { return failRate > 0 && rnd() < failRate; }
     void runDue() {
         for (size_t i = 0; i < evs.size();) {
             if (evs[i].at <= millis()) { auto fn = evs[i].fn; evs.erase(evs.begin() + i); fn(); i = 0; }
@@ -63,6 +85,12 @@ public:
         t = t < 0 ? 0 : (t > 1 ? 1 : t);
         double cx = s.ax + t * dx - px, cy = s.ay + t * dy - py;
         return std::sqrt(cx * cx + cy * cy);
+    }
+    double clearance(double x, double y) const {
+        double c = 1e9;
+        for (auto& w: walls) c = std::min(c, dseg(x, y, w));
+        for (auto& b: boxes) c = std::min(c, std::hypot(x - b.x, y - b.y) - b.r);
+        return c;
     }
     bool collides(double x, double y) const {
         for (auto& w: walls) if (dseg(x, y, w) < radius) return true;
@@ -82,21 +110,35 @@ public:
         double step = std::min(big, spd * dtS);
         double f = step / big;
         double ml = remL * f, mr = remR * f;
-        double al = ml * slipL, ar = mr * slipR; // actual travel
+        bool onCarpet = tx >= carpetX0 && tx <= carpetX1 && ty >= carpetY0 && ty <= carpetY1;
+        double carpet = onCarpet ? 0.97 : 1.0;
+        double al = ml * slipL * moveSlipL * carpet, ar = mr * slipR * moveSlipR * carpet; // actual travel
         double dth = (ar - al) / wheelBase, ds = (al + ar) / 2;
         double nx = tx + ds * std::cos(tth + dth / 2), ny = ty + ds * std::sin(tth + dth / 2);
         bool forward = ds > 0.01;
-        if (collides(nx, ny) && !(collides(tx, ty))) {
+        // Blocked when moving into something; when already touching, only moves
+        // that do not go deeper are possible (never through a wall)
+        if (collides(nx, ny) && (!collides(tx, ty) || clearance(nx, ny) < clearance(tx, ty))) {
             if (forward) bump = true;
+            if (std::getenv("SIM_DEBUG") && !stalled) {
+                std::string what = "wall";
+                for (auto& b: boxes) if (std::hypot(nx - b.x, ny - b.y) < radius + b.r) what = "box " + std::to_string((int)b.x) + "," + std::to_string((int)b.y);
+                std::printf("  [sim] contact at %.0f,%.0f th=%.0f with %s (t=%lus)\n", tx, ty, tth * 57.3, what.c_str(), millis() / 1000);
+            }
             stalled = true;
             collisions++;
             return; // wheels blocked — encoders do not advance
         }
         stalled = false;
+        bool nowCarpet = nx >= carpetX0 && nx <= carpetX1 && ny >= carpetY0 && ny <= carpetY1;
+        if (nowCarpet != onCarpet) tth += gauss() * 0.035; // Carpet edge knocks the heading (~2°)
         tx = nx; ty = ny; tth += dth;
         encL += ml; encR += mr; remL -= ml; remR -= mr;
     }
-    bool docked() const { return std::hypot(tx, ty) < 40 && std::fabs(std::remainder(tth, 2 * M_PI)) < 0.2; }
+    // On the contacts: centre within a few cm of the docked pose, facing out
+    bool docked() const {
+        return tx > -15 && tx < 35 && std::fabs(ty) < 22 && std::fabs(std::remainder(tth, 2 * M_PI)) < 6 * M_PI / 180;
+    }
 
     // -- API used by guided clean ----------------------------------------------------------
     void setGuidedCleanActive(bool a) { guided = a; }
@@ -110,16 +152,25 @@ public:
         later([this, on, cb] { inTestMode = on; remL = remR = 0; if (cb) cb(true); }); return true;
     }
     void getMotors(std::function<void(bool, const MotorData&)> cb, CommandPriority = PRIORITY_NORMAL) {
+        if (failNow()) { later([cb] { cb(false, MotorData()); }); return; }
         later([this, cb] { MotorData m; m.leftWheelPositionMM = static_cast<int>(std::lround(encL)); m.rightWheelPositionMM = static_cast<int>(std::lround(encR)); m.leftWheelLoad = m.rightWheelLoad = stalled ? 90 : 20; cb(true, m); });
     }
     void getDigitalSensors(std::function<void(bool, const DigitalSensorData&)> cb, CommandPriority = PRIORITY_NORMAL) {
+        if (failNow()) { later([cb] { cb(false, DigitalSensorData()); }); return; }
         later([this, cb] { DigitalSensorData d; d.lFrontBit = bump; d.rFrontBit = bump; d.dcJackIn = docked(); bump = false; cb(true, d); });
     }
     void getBatteryAnalog(std::function<void(bool, const BatteryAnalogData&)> cb, CommandPriority = PRIORITY_NORMAL) {
         later([this, cb] { BatteryAnalogData a; a.dropLeftMM = a.dropRightMM = overCliff() ? 90 : 19; cb(true, a); });
     }
     bool setMotorWheels(int l, int r, int s, std::function<void(bool)> cb = nullptr) {
-        later([this, l, r, s, cb] { remL = l; remR = r; spd = s; if (cb) cb(true); }); return true;
+        if (failNow() && (l != 0 || r != 0)) { later([cb] { if (cb) cb(false); }); return true; }
+        later([this, l, r, s, cb] {
+            remL = l; remR = r; spd = s;
+            moveSlipL = 1.0 + gauss() * moveNoise;
+            moveSlipR = 1.0 + gauss() * moveNoise;
+            if (cb) cb(true);
+        });
+        return true;
     }
     bool setMotorBrush(int rpm, std::function<void(bool)> cb = nullptr) { later([this, rpm, cb] { brush = rpm > 0; if (cb) cb(true); }); return true; }
     bool setMotorVacuum(bool, int = 80, std::function<void(bool)> cb = nullptr) { later([cb] { if (cb) cb(true); }); return true; }
@@ -143,13 +194,16 @@ public:
         }
         return best;
     }
+    int ldsWarmup = 0; // First N scans come back empty (LIDAR still spinning up)
     void getLdsScanFresh(std::function<void(bool, const LdsScanData&)> cb) { getLdsScan(cb); }
     void getLdsScan(std::function<void(bool, const LdsScanData&)> cb) {
-        later([this, cb] {
+        if (failNow()) { laterIn(scanLatency, [cb] { auto* d = new LdsScanData(); cb(false, *d); delete d; }); return; }
+        laterIn(scanLatency, [this, cb] {
             auto* d = new LdsScanData();
             for (int i = 0; i < 360; i++) {
                 double ang = tth + ldsSign * i * M_PI / 180.0;
-                double r = ldsOn ? ray(ang) : 0;
+                double r = ldsOn && scans >= ldsWarmup ? ray(ang) : 0;
+                if (r > 0 && rnd() < spuriousRate) r = 200 + rnd() * r; // Something unmapped in between
                 d->points[i].angleDeg = i;
                 d->points[i].distMM = r > 0 && r < 6000 ? static_cast<int>(r + (std::rand() % 17) - 8) : 0;
                 d->points[i].errorCode = d->points[i].distMM > 0 ? 0 : 1;

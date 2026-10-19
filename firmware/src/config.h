@@ -212,6 +212,7 @@ enum CommandStatus {
 #define FLOORMAP_TMP_FILE "/map/floor.tmp"
 #define FLOORMAP_FIELD_FILE "/map/field.bin"
 #define FLOORMAP_FIELD_TMP_FILE "/map/field.tmp"
+#define FLOORMAP_DOCK_FILE "/map/dock.txt" // Dock pose in the map frame, learned on the dock
 #define FLOORMAP_FIELD_MAX_BYTES 98304 // Likelihood field upload cap (e.g. 300x300 cells @ 5 cm + header)
 #define FLOORMAP_MAX_BYTES 65536 // 64 KB upload cap (3000 path points ~ 36 KB as text)
 #define FLOORMAP_MAX_PATH_POINTS 3000 // ~1.6h of recorded snapshots at 2s intervals
@@ -224,76 +225,104 @@ enum CommandStatus {
 #define GUIDED_POLL_MS 150 // Sensor poll cadence while wheels move (rotates motors/digital/analog)
 #define GUIDED_WHEEL_BASE_MM 248.0f // Botvac wheel track (distance between wheel contact points)
 #define GUIDED_ROBOT_RADIUS_MM 170 // Body radius + small margin, used for obstacles and shortcuts
-#define GUIDED_NOGO_MARGIN_MM 280 // No-go inflation: robot radius + allowance for odometry drift
+#define GUIDED_NOGO_MARGIN_MM 280 // No-go inflation: robot radius + allowance for localization error
 #define GUIDED_COVER_CELL_MM 100 // Coverage grid cell size for "known free floor" shortcut checks
 #define GUIDED_COVER_STAMP_MM 100 // Radius stamped around recorded poses into the coverage grid
 #define GUIDED_COVER_MAX_CELLS 250 // Max grid cells per axis (25 m at 100 mm) — ~7.8 KB bitmap
 #define GUIDED_SHORTCUT_WINDOW 40 // Max waypoints skipped ahead by one transit shortcut
 #define GUIDED_REACHED_MM 120 // Waypoint counts as reached within this distance
-#define GUIDED_HEADING_TOL_DEG 12.0f // Turn in place first if heading error exceeds this
-#define GUIDED_MAX_STEP_MM 600 // Longest straight drive per segment before re-planning
+#define GUIDED_HEADING_TOL_DEG 10.0f // Turn in place first if heading error exceeds this
+#define GUIDED_STEP_MM 700 // Longest drive before standing still and checking the pose against the map
+#define GUIDED_TURN_FIX_DEG 45.0f // Turns larger than this are followed by a scan, too
 #define GUIDED_MIN_POINT_SPACING_MM 100 // Drop recorded points closer than this to the previous one
 #define GUIDED_SPEED_CLEAN 150 // mm/s while cleaning inside a selected room
 #define GUIDED_SPEED_TRANSIT 200 // mm/s while driving between rooms / returning
 #define GUIDED_SPEED_TURN 120 // mm/s wheel speed for turns in place
-#define GUIDED_SPEED_SLOW 80 // mm/s for backing off obstacles and docking
+#define GUIDED_SPEED_SLOW 80 // mm/s for backing off obstacles, undocking and docking
 #define GUIDED_BACKOFF_MM 100 // Reverse distance after a bump / stall / drop
 #define GUIDED_SKIP_AFTER_OBSTACLE_MM 350 // Skip waypoints within this distance of an obstructed target
-#define GUIDED_MAX_OBSTACLE_STREAK 6 // Consecutive obstructed waypoints before giving up on the phase
+#define GUIDED_MAX_OBSTACLE_STREAK 6 // Consecutive obstructed waypoints before giving up on the run
 #define GUIDED_DROP_MM 50 // Drop (cliff) sensor reading above this is a cliff — floor reads ~20 mm
 #define GUIDED_STALL_LOAD_PCT 70 // Wheel load above this for 2 polls counts as stalled
-#define GUIDED_SEGMENT_SLACK_MS 2500 // Segment timeout = expected duration + slack
+#define GUIDED_SEGMENT_SLACK_MS 3000 // Move deadline = expected duration + slack
 #define GUIDED_MIN_BATTERY_PCT 20 // Return to dock below this charge
 #define GUIDED_BATTERY_POLL_MS 60000 // Battery check cadence while running
 #define GUIDED_MAX_RUNTIME_MS 7200000UL // Hard limit (2h) — return home after this
-#define GUIDED_DOCK_STAGING_MM 900 // Staging point on the dock axis: arrive here, align, scan-match
-#define GUIDED_DOCK_PREBACK_MM 300 // Last stop on the dock axis before the final straight back-in
-#define GUIDED_DOCK_LATERAL_TOL_MM 50 // Max sideways offset from the dock axis for the final back-in
-#define GUIDED_DOCK_ATTEMPTS 2 // Full approach attempts before handing over to the robot's own docking
-#define GUIDED_OBSTACLE_RADIUS_MM 150 // Remembered obstacle footprint (bump/stall) placed ahead of the robot
+// Watchdogs: no wait may hang the run
+#define GUIDED_CMD_TIMEOUT_MS 8000 // Max wait for a serial answer (the queue retries/times out at 3 s)
+#define GUIDED_SCAN_TIMEOUT_MS 6000 // Max wait for a LIDAR scan
+#define GUIDED_STALL_MS 45000UL // No progress at all for this long → abort (motors off, TestMode off)
+#define GUIDED_MAX_TIMEOUTS 5 // Timeouts in a row (no good fix in between) before aborting
+#define GUIDED_FINISH_TIMEOUT_MS 15000UL // Max wait for leaving TestMode, then retried in the background ...
+#define GUIDED_RELEASE_RETRY_MS 10000 // ... this often ...
+#define GUIDED_RELEASE_GIVEUP_MS 600000UL // ... for this long
+#define GUIDED_SETTLE_MS 300 // Stand still this long before a scan (the LIDAR scan is ~0.2 s per turn)
+// Start + localization (particle filter, see particle_filter.h)
+#define GUIDED_LDS_SPINUP_MS 3000 // Wait after SetLDSRotation On before the first scan
+#define GUIDED_LOC_FIRST_MIN_POINTS 120 // A dock scan needs this many valid returns (LIDAR spun up)
+#define GUIDED_LOC_FIRST_TRIES 12 // Incomplete dock scans are retried this often (0.8 s apart)
+#define GUIDED_LOC_START_RADIUS_MM 400 // First fix around the learned dock pose ...
+#define GUIDED_LOC_START_ANGLE_DEG 20
+#define GUIDED_LOC_GLOBAL_RADIUS_MM 1200 // ... or, unknown / not matching, around the map origin
+#define GUIDED_LOC_GLOBAL_ANGLE_DEG 60
+#define GUIDED_START_MIN_SCORE 0.55f // A dock-pose match below this also tries the wide search
+#define GUIDED_UNDOCK_MM 300 // Drive this far off the dock before turning around
+#define GUIDED_PF_PARTICLES 240 // Particles (16 B each)
+#define GUIDED_PF_SEED_MM 120.0f // Initial cloud 1σ around a scan match
+#define GUIDED_PF_SEED_DEG 6.0f
+#define GUIDED_START_SPREAD_MM 80.0f // Converged at the start: position spread below this ...
+#define GUIDED_START_SPREAD_DEG 5.0f // ... and heading spread below this
+#define GUIDED_LOST_QUALITY 0.6f // Fix quality (mean field value under the scan) below this = bad fix
+#define GUIDED_LOST_SPREAD_MM 180.0f // Spread above this = bad fix; two in a row → re-localize
+#define GUIDED_RELOC_TRIES 2 // Turn-around re-localizations before giving up
+#define GUIDED_RELOC_RADIUS_MM 600 // Re-seed search window around the estimate (doubled on the next try)
+#define GUIDED_RELOC_ANGLE_DEG 35
+#define GUIDED_RESET_RADIUS_MM 400 // Bad fix: exhaustive match this far around the estimate ...
+#define GUIDED_RESET_ANGLE_DEG 20
+#define GUIDED_RESET_MIN_SCORE 0.75f // ... re-seeds the filter when it explains the scan this well
+#define GUIDED_GLOBAL_MIN_SCORE 0.8f // Whole-floor search (last resort when lost) must explain the scan this well
+#define GUIDED_REPLAN_JUMP_MM 250 // A correction this large re-plans the transit leg
+#define GUIDED_DOCK_REMATCH_MM 300 // Dock pose: reference scan matched this far around the odometry guess
+#define GUIDED_DOCK_REMATCH_DEG 25
+#define GUIDED_DOCK_AGREE_MM 250 // A dock pose this close to the learned one refines it (else replaces)
+#define GUIDED_DOCK_AGREE_DEG 12.0f
+// Docking (dock frame: origin on the contacts, +x = robot heading when docked)
+#define GUIDED_DOCK_STAGING_MM 650 // Staging point on the dock axis: arrive, face the axis, match the reference
+#define GUIDED_DOCK_PREBACK_MM 280 // Last stop on the axis before the final straight back-in
+#define GUIDED_DOCK_LATERAL_TOL_MM 25 // Max sideways offset for the final back-in
+#define GUIDED_DOCK_HEADING_TOL_DEG 3.0f
+#define GUIDED_DOCK_ATTEMPTS 3 // Approaches before handing over to the robot's own docking
+#define GUIDED_ICP_MAX_CORR_MM 500 // Reject reference matches that move the pose further than this
+#define GUIDED_OBSTACLE_RADIUS_MM 100 // Remembered obstacle footprint (bump/stall) placed ahead of the robot
+#define GUIDED_BUMP_MEMORY_MS 180000UL // Bumps are forgotten after this
 #define GUIDED_CLIFF_RADIUS_MM 250 // Remembered cliff footprint
 #define GUIDED_MAX_OBSTACLES 24 // Obstacle memory (oldest dropped first)
-// LIDAR wall compass — corrects heading drift by aligning to the dominant wall
-// direction (most rooms are rectangular). Reference taken on the dock.
-#define GUIDED_LDS_SPINUP_MS 2500 // Wait after SetLDSRotation On before the first scan
-#define GUIDED_COMPASS_EVERY_MM 1000 // Re-align after this much travel ...
-#define GUIDED_COMPASS_EVERY_DEG 75.0f // ... or this much accumulated turning
-#define GUIDED_COMPASS_MIN_CONF 0.35f // Min alignment strength (0..1) of the wall direction histogram
-#define GUIDED_COMPASS_MAX_FIX_DEG 20.0f // Ignore corrections larger than this (clutter / non-rectangular room)
-// LIDAR localization against the mapping-run field (floor_map.h LocField)
-#define GUIDED_LOC_EVERY_MM 400 // Re-localize after this much travel ...
-#define GUIDED_LOC_EVERY_DEG 30.0f // ... or this much turning
-#define GUIDED_LOC_RADIUS_MM 300 // Search window around the odometry pose
-#define GUIDED_LOC_ANGLE_DEG 10 // Heading search window (±)
-#define GUIDED_LOC_START_RADIUS_MM 500 // Wider search for the first fix on the dock
-#define GUIDED_LOC_START_ANGLE_DEG 25
-#define GUIDED_LOC_MIN_SCORE 0.30f // Min normalized match score (0..1) to accept a fix
-// Dock homing — ICP scan match against the reference scan taken on the dock
-#define GUIDED_ICP_MAX_CORR_MM 900 // Reject matches that move the pose further than this
-// Path planning — BFS over a coarse grid of floor the recording covered
+#define GUIDED_DYN_RANGE_MM 1500 // LIDAR obstacle layer: returns closer than this ...
+#define GUIDED_DYN_FIELD_MAX 40 // ... where the map has nothing (≥ ~250 mm from mapped returns) ...
+#define GUIDED_DYN_HITS 4 // ... seen at two stops (2 per scan) are avoided like walls
+#define GUIDED_DYN_MAX_CELLS 12000 // Layer size limit (cells doubled for big homes)
+// Planning
 #define GUIDED_PLAN_CELL_MM 200 // Planning grid cell (doubled automatically for large homes)
 #define GUIDED_PLAN_MAX_CELLS 120 // Max cells per axis (dist map ≤ 29 KB while planning)
 #define GUIDED_MAX_REPLANS 4 // Re-plans of one transit leg after obstacles before giving up on it
-#define GUIDED_TRACE_FILE "/map/trace.jsonl" // Run trace of the last guided clean (always recorded)
-#define GUIDED_TRACE_MAX_BYTES 98304
-#define GUIDED_TRACE_FLUSH_BYTES 2048
-#define GUIDED_TRACE_EVERY_MM 150 // Pose line after this much travel ...
-#define GUIDED_TRACE_EVERY_DEG 20.0f // ... or this much turning
-#define GUIDED_RUN_GAP_MM 1200
-// Structured coverage: parallel lanes (boustrophedon) inside each selected room
+#define GUIDED_MAX_REPLANS_HOME 12 // ... on the way home
+#define GUIDED_MAX_ESCAPES 6 // Step-out moves per leg when boxed in
+#define GUIDED_ESCAPE_MM 250 // Length of one step-out move
+#define GUIDED_RUN_GAP_MM 1200 // Recorded points further apart than this start a new cleaning run
 #define GUIDED_LANE_SPACING_MM 250 // Lane distance (brush ~ 270 mm wide → slight overlap)
 #define GUIDED_LANE_POINT_MM 300 // Waypoint spacing along a lane
 #define GUIDED_LANE_MIN_MM 200 // Shorter free stretches are not worth a lane
-#define GUIDED_FIELD_FREE_MAX 68 // Planning: field value ≤ this = ≥ ~220 mm from any wall (robot centre fits)
-#define GUIDED_FIELD_LANE_MAX 110 // Lanes: ≥ ~170 mm from mapped returns (clutter is handled by the bumper)
-// Continuous driving: arcs instead of turn-then-drive, next command before the robot stops
-#define GUIDED_ARC_MAX_DEG 55.0f // Heading errors up to this are driven as an arc
-#define GUIDED_ARC_MAX_BULGE_MM 50 // Max sideways bulge of an arc from the checked straight line
-#define GUIDED_CHAIN_MM 180 // Issue the next command when this little of the current one is left
-#define GUIDED_CHAIN_REACH_MM 250 // While chaining, a waypoint this close counts as reached
-#define GUIDED_LOC_MOVING_EVERY_MM                                                                                     \
-    600 // Scan-match on the move after this much travel // Recorded points further apart than this start a new cleaning
-        // run
+#define GUIDED_FIELD_FREE_MAX 68 // Planning: field value ≤ this = ≥ ~220 mm from any wall (300 mm falloff)
+#define GUIDED_FIELD_WALL_MIN 225 // Field value ≥ this = inside a mapped wall line (≤ ~35 mm)
+#define GUIDED_FIELD_LANE_MAX 76 // Lanes: ≥ ~210 mm from mapped returns (room to turn at the lane ends)
+#define GUIDED_PLAN_CLEARANCE_MM 250.0f // Transit paths use cells with at least this much room
+#define GUIDED_CLEARANCE_MM 200.0f // Straight lines keep this from walls and seen obstacles (radius 165 + pose error)
+// Run trace
+#define GUIDED_TRACE_FILE "/map/trace.jsonl" // Run trace of the last guided clean (always recorded)
+#define GUIDED_TRACE_MAX_BYTES 98304
+#define GUIDED_TRACE_FLUSH_BYTES 2048
+#define GUIDED_TRACE_EVERY_MM 300 // Pose line after this much travel ...
+#define GUIDED_TRACE_EVERY_DEG 45.0f // ... or this much turning
 
 // Task Watchdog Timer (TWDT) — hardware watchdog that resets the ESP32 if
 // loop() stops running (deadlock, infinite loop, blocking I/O). The main task

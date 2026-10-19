@@ -536,5 +536,17 @@
   "Docking was handed over to the robot.": "Yanaşma robota devredildi.",
   "Shortcuts": "Kısayollar",
   "The LIDAR wall map could not be loaded (not enough memory). The robot drives on odometry only.": "LIDAR duvar haritası yüklenemedi (yetersiz bellek). Robot yalnızca odometriyle gidiyor.",
-  "No LIDAR wall map: the robot drives on odometry only and its position drifts. Pin a mapping run (badge LIDAR map) under Edit, Use another cleaning run.": "LIDAR duvar haritası yok: robot yalnızca odometriyle gidiyor ve konumu kayıyor. Düzenle altında Başka bir tur kullan ile bir haritalama turu (LIDAR haritası rozeti) seçin."
+  "No LIDAR wall map: the robot drives on odometry only and its position drifts. Pin a mapping run (badge LIDAR map) under Edit, Use another cleaning run.": "LIDAR duvar haritası yok: robot yalnızca odometriyle gidiyor ve konumu kayıyor. Düzenle altında Başka bir tur kullan ile bir haritalama turu (LIDAR haritası rozeti) seçin.",
+  "Localizing...": "Konum belirleniyor...",
+  "start the robot on its dock": "Robotu şarj istasyonunda başlat",
+  "no LIDAR map: pin a mapping run first": "LIDAR haritası yok: önce bir haritalama turunu sabitle",
+  "the LIDAR map could not be loaded (not enough memory) - restart the ESP32": "LIDAR haritası yüklenemedi (yetersiz bellek) - ESP32'yi yeniden başlat",
+  "the LIDAR delivers no usable scans (is the turret spinning?)": "LIDAR kullanılabilir tarama vermiyor (kule dönüyor mu?)",
+  "position not found on the map - record a new mapping run": "konum haritada bulunamadı - yeni bir haritalama turu kaydet",
+  "lost: the position no longer matches the map": "kayboldu: konum artık haritayla eşleşmiyor",
+  "docking handed over to the robot": "yanaşma robota devredildi",
+  "way home blocked - the robot docks itself": "eve dönüş yolu kapalı - robot kendisi yanaşıyor",
+  "a room clean is running": "bir oda temizliği çalışıyor",
+  "run took far too long": "tur çok uzun sürdü",
+  "Map lock {score}% · ±{mm} mm": "Harita eşleşmesi %{score} · ±{mm} mm"
 }

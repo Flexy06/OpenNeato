@@ -3,12 +3,14 @@
 
 #include <Arduino.h>
 #include <functional>
+#include <memory>
 #include <vector>
 #include "config.h"
 #include "data_logger.h"
 #include "floor_map.h"
 #include "loop_task.h"
 #include "neato_serial.h"
+#include "particle_filter.h"
 
 class ManualCleanManager;
 class SystemManager;
@@ -16,30 +18,29 @@ class SystemManager;
 // Guided clean: room cleaning and no-go zones on top of a pinned floor map.
 //
 // The robot firmware exposes no zone or map API over serial, so the ESP32
-// drives the robot itself (TestMode + SetMotor), replaying the recorded path
-// of the pinned session ("line tracer", see issue #68 upstream):
+// drives the robot itself (TestMode + SetMotor). Design (v2):
 //
-//   1. Route   — the pinned path from the dock up to the last point that lies
-//                in a selected room. Points inside (or within the robot radius
-//                of) a no-go zone are removed. Points inside a selected room
-//                are "clean" waypoints (brush/vacuum on), the rest "transit".
-//   2. Drive   — stop-and-go segments: turn in place towards the next
-//                waypoint, then drive straight (max GUIDED_MAX_STEP_MM), then
-//                re-plan. Transit waypoints may be shortcut when the straight
-//                line stays on floor the robot already covered during the
-//                recording (coverage bitmap) and clear of every no-go zone.
-//   3. Pose    — dead reckoning from the wheel encoders (GetMotors
-//                Left/RightWheel_PositionInMM), starting at the dock = map
-//                origin (0,0, heading 0). There is no relocalization, so drift
-//                grows with distance; keep runs short and pin a clean run.
-//   4. Safety  — bumpers, wheel stall (load), cliff sensors (DropSensor*) and
-//                wheel lift are polled continuously. Contact → stop, back off,
-//                skip ahead. Wheel lift → abort. Low battery / too many
-//                obstacles / max runtime → return to the dock.
-//   5. Return  — retrace the travelled route back to an approach point in
-//                front of the dock, face away from it and back onto the
-//                contacts (the robot docks rear-first). If the contacts are not
-//                detected, fall back to the robot's own SEND_TO_BASE event.
+//   1. Map      — the LIDAR likelihood field of a pinned mapping run is required.
+//                 Lanes over the free floor of each selected room, transit planned
+//                 on a coarse grid (reachable, clear of inflated no-go zones).
+//   2. Start    — like the robot's own undocking: on the dock, wait until the
+//                 LIDAR delivers full scans, keep that scan as the dock reference,
+//                 drive 30 cm off the dock and turn once around in four stops,
+//                 scanning at each. A particle filter must converge before any
+//                 cleaning starts; the dock pose in the map is learned from this.
+//   3. Drive    — stop-and-go: turn in place, drive straight ≤ GUIDED_STEP_MM,
+//                 stand still, scan, update the particle filter. Every step is
+//                 checked against the map; the filter's spread says when the
+//                 robot is unsure — then it stops and re-localizes by turning
+//                 on the spot instead of driving on blind.
+//   4. Dock     — drive to a staging point in front of the dock, then align by
+//                 matching scans against the dock reference scan (ICP, cm-level:
+//                 same place, same view) and back straight onto the contacts.
+//                 Verified by the charger; retried; the robot's own docking is
+//                 only the very last resort.
+//   5. Safety   — every wait (serial answer, motion, scan) has a deadline and a
+//                 run without progress is aborted: motors off, TestMode left, so
+//                 the robot never hangs in TestMode. "Home" and "Stop" always act.
 //
 // Everything runs from tick() via serial callbacks — never blocks loop().
 class GuidedCleanManager : public LoopTask {
@@ -60,22 +61,28 @@ public:
 
     // Trace of the last run (see traceBegin); flushes pending lines first
     bool hasTrace() const;
+    // Still trying to leave TestMode after a run (serial outage while finishing)
+    bool releasing() const { return releaseSince != 0; }
     void flushTrace() { traceFlush(); }
 
 private:
     enum class Phase : uint8_t {
         Idle, // Never run since boot
-        Starting, // Pre-flight checks + TestMode entry
-        Running, // Replaying the route
-        Returning, // Driving back to the dock approach point
-        Docking, // Turning + backing onto the contacts
+        Starting, // Pre-flight checks, TestMode, LIDAR spin-up
+        Localizing, // Dock reference scan, undocking, turn-around scans until the filter converges
+        Running, // Cleaning lanes / transit between them
+        Returning, // Driving back to the dock staging point
+        Docking, // Aligning on the dock reference scan, backing onto the contacts
         Finishing, // Leaving TestMode
         Done,
         Stopped,
         Failed,
     };
 
-    enum class SegKind : uint8_t { None, Turn, Drive, Reverse, Backoff, DockBack };
+    // The one thing the controller is waiting for (each with a deadline)
+    enum class Wait : uint8_t { None, Cmd, Motion, Delay, Scan };
+    enum class MoveKind : uint8_t { None, Turn, Drive, Reverse, Backoff, DockBack };
+    enum class MoveResult : uint8_t { Ok, Blocked, Cliff, Contact };
 
     struct Waypoint {
         int16_t x = 0;
@@ -112,10 +119,11 @@ private:
     unsigned long startedMs = 0;
     time_t startedEpoch = 0;
     unsigned long finishedMs = 0;
+    uint32_t runGen = 0; // Incremented per run/finish; stale serial callbacks compare against it
 
-    // Coarse planning grid: free = floor the robot covered during the recording,
-    // minus (inflated) no-go zones. Obstacles found during the run are checked
-    // on top at planning time.
+    // Coarse planning grid: free = floor clear of walls in the LIDAR map (or
+    // covered during the recording), minus inflated no-go zones, reachable from
+    // the dock. Obstacles found during the run are checked on top.
     struct PlanGrid {
         int originX = 0;
         int originY = 0;
@@ -132,7 +140,7 @@ private:
         void clear();
     };
 
-    // A cleaning run: consecutive recorded points inside the selected rooms
+    // A cleaning run: consecutive lane points inside the selected rooms
     struct Run {
         uint16_t first = 0; // Index into cleanPts
         uint16_t last = 0;
@@ -162,14 +170,6 @@ private:
     int cleanDone = 0;
     int obstacleStreak = 0;
     int obstacleTotal = 0;
-    bool fallbackDock = false;
-    // Docking stages (see step()): staging-point alignment → scan match → reverse
-    // along the dock axis → final alignment + scan match → straight back-in → verify
-    uint8_t dockStage = 0;
-    int dockAttempts = 0;
-    bool dockIcpNearDone = false;
-    unsigned long dockCheckAtMs = 0;
-    uint32_t runGen = 0; // Incremented per run/finish; stale serial callbacks compare against it
 
     String buildPlan(const FloorMapData& map, const String& rooms);
     bool floorFree(float x, float y) const;
@@ -178,125 +178,177 @@ private:
     void planRecorded(const FloorMapData& map, const std::vector<const MapZone *>& selected);
     void freePlan();
 
-    // -- Pose (dead reckoning, mm / radians) -------------------------------------
+    // -- Pose (mm / radians, map frame) ------------------------------------------
+    // pose = particle filter estimate at the last scan + wheel odometry since.
     float poseX = 0.0f;
     float poseY = 0.0f;
     float poseTheta = 0.0f;
+    // Pose right after the last filter update (odometry delta since = motion model input)
+    float fixX = 0.0f;
+    float fixY = 0.0f;
+    float fixT = 0.0f;
+    // Pure odometry since leaving the dock, in the dock frame (learns the dock pose)
+    float odoX = 0.0f;
+    float odoY = 0.0f;
+    float odoT = 0.0f;
     bool encValid = false;
     int encL = 0;
     int encR = 0;
     void integrateEncoders(int newL, int newR);
 
-    // -- Segment executor ---------------------------------------------------------
-    SegKind seg = SegKind::None;
-    int segCmdL = 0;
-    int segCmdR = 0;
-    int segStartL = 0;
-    int segStartR = 0;
-    unsigned long segStartMs = 0;
-    unsigned long segTimeoutMs = 0;
-    int segStillPolls = 0;
-    int segStallPolls = 0;
-    bool segStopping = false; // Stop command in flight; ignore further triggers
-    bool waitingCmd = false; // A setup/teardown serial chain is in flight
-    bool inTestMode = false; // TestMode entered by this run (must be left on finish)
+    // -- Waits + watchdog -----------------------------------------------------------
+    Wait wait = Wait::None;
+    unsigned long waitDeadline = 0;
+    const char *waitWhat = "";
+    uint32_t waitGen = 0; // Bumped on every wait start/end: late answers are dropped
+    std::function<void()> afterDelay;
+    std::function<void()> cmdFallback; // How to carry on if a Cmd wait times out (else: abort / re-decide)
+    unsigned long lastProgressMs = 0;
+    int timeoutCount = 0;
+    unsigned long finishingSince = 0;
+    unsigned long releaseSince = 0;
+    Ticker releaseTicker;
+    void beginWait(Wait w, unsigned long ms, const char *what);
+    void endWait();
+    void progress() { lastProgressMs = millis(); }
+    void delayThen(unsigned long ms, const char *what, std::function<void()> fn);
+    void settleThen(std::function<void()> fn);
+    void onWaitTimeout();
+    void abortRun(const String& reason);
 
-    void startSegment(SegKind kind, int leftMM, int rightMM, int speed);
-    void endSegment(bool obstacle);
-    void onObstacle(const char *reason);
+    // -- Motion executor ------------------------------------------------------------
+    MoveKind move = MoveKind::None;
+    int moveCmdL = 0;
+    int moveCmdR = 0;
+    int moveStartL = 0;
+    int moveStartR = 0;
+    unsigned long moveStartMs = 0;
+    int moveStillPolls = 0;
+    int moveStallPolls = 0;
+    bool moveEnding = false;
+    std::function<void(MoveResult)> onMoveDone;
+    const char *blockReason = "";
+    void startMove(MoveKind kind, int leftMM, int rightMM, int speed, std::function<void(MoveResult)> done);
+    void turnBy(float rad, std::function<void(MoveResult)> done);
+    void endMove(MoveResult r);
+    // Bump/stall/cliff: stop, back off, then report Blocked/Cliff to the move's owner
+    void onContact(const char *reason, bool cliff);
 
     // -- Sensor polling ------------------------------------------------------------
     Ticker pollTicker;
     Ticker batteryTicker;
     uint8_t pollSlot = 0;
     bool pollPending = false;
+    unsigned long pollSentMs = 0;
     void pollSensors();
     void onMotors(const MotorData& m);
     void onDigital(const DigitalSensorData& d);
     void onAnalog(const BatteryAnalogData& a);
 
     // -- Obstacle memory (bumps, stalls, cliffs seen during this run) ---------------
+    // Bump memory: what the LIDAR cannot see (low obstacles, glass) — forgotten after
+    // a while, since the robot's own pose error can make it bump a mapped wall
     struct Obstacle {
         int16_t x = 0;
         int16_t y = 0;
         int16_t r = 0;
+        unsigned long atMs = 0;
+        bool live() const { return millis() - atMs < GUIDED_BUMP_MEMORY_MS; }
     };
     std::vector<Obstacle> obstacles;
-    void rememberObstacle(float aheadMM, int radius);
+    // LIDAR obstacle layer: returns at stops that the map does not explain (chairs,
+    // bags, a moved table) — avoided before the bumper finds them. Hit counts per
+    // cell (rays passing through clear them again) + an inflated "keep out" count.
+    struct DynGrid {
+        int originX = 0;
+        int originY = 0;
+        int cell = 100;
+        int w = 0;
+        int h = 0;
+        std::vector<uint8_t> hits;
+        std::vector<uint8_t> infl;
+        bool inside(int cx, int cy) const { return cx >= 0 && cy >= 0 && cx < w && cy < h; }
+        bool blocked(float x, float y) const;
+        void clear();
+    };
+    DynGrid dyn;
+    void initDyn();
+    void markScan();
+    void dynSet(int cx, int cy, bool occupied);
+    void rememberObstacle(float aheadMM, int radius, bool behind);
+    bool nearNogo(float x, float y) const;
+    bool nearObstacle(float x, float y) const;
+    bool segmentClear(float ax, float ay, float bx, float by, bool requireCover) const;
 
-    // -- LIDAR wall compass ---------------------------------------------------------------
-    // Heading drift is the dominant odometry error. Rooms are mostly rectangular, so
-    // the dominant wall direction seen by the LIDAR (mod 90°) is fixed in the world.
-    // A reference is taken on the dock; later scans correct the heading estimate.
-    // The LDS angle direction (CW/CCW) is auto-detected from the first turns.
-    bool ldsOn = false;
-    unsigned long ldsReadyAtMs = 0;
-    bool compassTried = false;
-    bool compassRef = false;
-    float compassPhi0 = 0.0f; // Dominant wall angle in the robot frame at the dock (rad, mod 90°)
-    int compassSign = 0; // +1 = LDS angles CCW, -1 = CW, 0 = not yet calibrated
-    uint8_t calStage = 0; // Direction calibration: 0 = pending, 1 = turning, 2 = scanned/done
-    int calAttempts = 0;
-    float distSinceFix = 0.0f; // mm
-    float turnSinceFix = 0.0f; // rad
-    unsigned long lastScanMs = 0;
-    int compassFixes = 0;
-    float lastFixDeg = 0.0f;
-    void requestScan(bool reference);
-    int16_t refScan[360] = {}; // Reference scan on the dock (mm per degree, 0 = invalid)
-    bool refScanValid = false;
-    int dockIcpTries = 0;
-    void requestIcpScan(uint8_t resumeStage);
-
-    // -- LIDAR localization against the mapping-run field ----------------------------
+    // -- Localization ---------------------------------------------------------------
     LocField field;
     bool fieldLoadFailed = false; // A field exists but could not be loaded (memory)
-    bool locInit = false;
+    ParticleFilter pf{GUIDED_PF_PARTICLES};
+    ScanBeams beams;
+    bool ldsOn = false;
     bool bootChecked = false;
     int locFixes = 0;
-    float locScore = 0.0f;
-    void requestLocScan(int radiusMM, int angleDeg, uint8_t resumeStage);
-    void requestLocScanMoving();
-    bool locMovingPending = false;
-    float mcX = 0.0f; // Pose at scan request (centre of the match search)
-    float mcY = 0.0f;
-    float mcT = 0.0f;
-    // Continuous driving
-    bool chaining = false;
-    void chainNext();
+    int locRejected = 0;
+    float locScore = 0.0f; // Quality of the last fix (mean field value under the scan, 0..1)
+    float locSpread = 0.0f; // Filter 1σ position spread (mm)
+    int lostCount = 0;
+    int relocTries = 0;
+    bool needFix = false;
     // Deferred scan processing (see fetchScan): keeps big buffers off the loop stack
     LdsScanData scanBuf;
     bool scanJobOk = false;
+    bool scanReady = false;
+    bool inTestMode = false; // TestMode On was sent by this run (finishing must leave it)
     std::function<void(bool, const LdsScanData&)> scanJob;
-    void fetchScan(std::function<void(bool, const LdsScanData&)> handler);
-    float mfPx[180] = {};
-    float mfPy[180] = {};
-    int mfBx[180] = {};
-    int mfBy[180] = {};
-    // Correlative scan match around the current pose; updates the pose on success
-    bool matchField(const LdsScanData& scan, int radiusMM, int angleDeg);
-    bool matchReference(const LdsScanData& scan, float& corrX, float& corrY, float& corrT) const;
-    void applyCompass(const LdsScanData& scan, bool reference);
-    static bool dominantWallAngle(const LdsScanData& scan, float& phi, float& conf);
+    void scanThen(const char *what, std::function<void(bool, const LdsScanData&)> handler);
+    // Filter update from a stationary scan; returns false when the scan was unusable
+    bool applyFix(const LdsScanData& scan, const char *tag);
+    void reseedAround(float x, float y, float t, int radiusMM, int angleDeg, float sigmaXY);
+    void trackingFix();
+
+    // -- Start / re-localization -------------------------------------------------------
+    int dockScanTries = 0;
+    bool dockKnown = false; // Learned dock pose loaded / measured this run
+    int dockRuns = 0;
+    int spinLeft = 0; // Turn-around stops still to do
+    bool spinForStart = false;
+    void beginStart();
+    void startDockScan();
+    void onDockScan(const LdsScanData& scan);
+    void beginSpin(bool forStart);
+    void spinStep();
+    void onSpinDone();
+    void learnDockPose(bool save);
+    bool globalTried = false;
+    bool globalRelocalize();
 
     // -- Cleaning motors ----------------------------------------------------------
     bool motorsOn = false;
     void setCleaningMotors(bool on);
 
-    // -- Phase logic -----------------------------------------------------------------
-    void beginStart();
-    void step(); // Decide the next segment when idle
+    // -- Navigation ------------------------------------------------------------------
+    void step(); // Decide the next action when idle
     void selectNextTarget();
-    // Start a turn or straight segment towards (tx, ty). Returns false if already within tolMM.
-    bool driveTowards(float tx, float ty, int speed, bool allowReverse, int tolMM);
-    bool segmentClear(float ax, float ay, float bx, float by, bool requireCover) const;
-    bool nearNogo(float x, float y) const;
-    bool nearObstacle(float x, float y) const;
+    // Turn towards / drive straight to (tx, ty)
+    void moveTowards(float tx, float ty, int speed);
+    void onNavMoveDone(MoveKind kind, float turned, MoveResult r);
     void markReached(size_t idx);
-    // -- Legs / planning ------------------------------------------------------------
     void buildGrid();
     bool cellBlocked(int cx, int cy) const;
+    bool cellBlockedRaw(int cx, int cy) const;
+    void buildPlanMask() const;
+    mutable std::vector<uint8_t> planMask; // Per plan: 1 = not usable for transit
     bool gridLineFree(float ax, float ay, float bx, float by) const;
+    bool lineClearance(float ax, float ay, float bx, float by) const;
+    float wallDist(float x, float y) const;
+    float dynNearest(float x, float y) const;
+    float clearanceAt(float x, float y) const;
+    bool onFloor(float x, float y) const;
+    FloorTest floorTest = [this](float x, float y) { return onFloor(x, y); };
+    bool needEscape = false;
+    int escapes = 0;
+    float lastEscapeHeading = 0.0f;
+    void escapeMove();
     bool planPath(float gx, float gy, std::vector<Waypoint>& out) const;
     bool planPathOnce(float gx, float gy, std::vector<Waypoint>& out) const;
     mutable bool planIgnoreObstacles = false;
@@ -306,25 +358,36 @@ private:
     void skipCurrentRun(const char *why);
     void onLegComplete();
     void onTransitBlocked();
+    void onBlocked();
     void pushCrumb();
     void fallbackReturn();
-    void stepDocking();
     void beginReturn(const String& reason);
-    void beginDocking();
-    void checkDocked();
-    // Dock pose in the map frame (measured on the dock by the first scan match)
+
+    // -- Docking ------------------------------------------------------------------------
+    // Dock pose in the map frame (learned at the start)
     float dockX = 0.0f;
     float dockY = 0.0f;
     float dockT = 0.0f;
+    int16_t refScan[360] = {}; // Dock reference scan (mm per LIDAR angle index, 0 = invalid)
+    bool refScanValid = false;
+    int dockAttempts = 0;
+    int dockIcpFails = 0;
     void toDock(float x, float y, float& lx, float& ly) const;
     void fromDock(float lx, float ly, float& x, float& y) const;
-    void onDockMissed();
-    // Robot's own docking after the hand-over: verified for a while
+    void beginDocking();
+    void dockAlign(); // Face the dock axis, scan, match against the reference
+    void onDockScan2(bool ok, const LdsScanData& scan);
+    void dockDecide(float lx, float ly, float lt);
+    void dockRetry(const char *why);
+    void checkDocked();
+    // ICP of a scan against the dock reference; guess and result in the dock frame
+    bool matchReference(const LdsScanData& scan, float& lx, float& ly, float& lt) const;
+    // Robot's own docking (last resort): verified for a while after the hand-over
+    bool fallbackDock = false;
     unsigned long dockWatchSince = 0;
     bool dockWatchRetried = false;
     Ticker dockWatchTicker;
-    bool dockScanPending = false;
-    void traceDockScan(const LdsScanData& scan);
+
     void finish(Phase result, const String& reason);
     void fail(const String& reason) { finish(Phase::Failed, reason); }
 
@@ -333,11 +396,11 @@ private:
     size_t traceBytes = 0;
     float traceDist = 0.0f;
     float traceTurn = 0.0f;
-    uint8_t tracedDockStage = 255;
     unsigned long traceStartMs = 0;
     void traceBegin();
     void traceFlush();
     void tracePose(const String& name, const std::vector<Field>& fields);
+    void traceDockScan(const LdsScanData& scan, const char *name, int maxDistMM);
     // Log to the data logger (if enabled) and to the run trace (always)
     void event(const String& name, const std::vector<Field>& fields);
 

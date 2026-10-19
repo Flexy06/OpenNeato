@@ -121,6 +121,11 @@ public:
     bool remove();
     // Drop only the localization field (pinned a run without LIDAR scans)
     bool removeField();
+    // Dock pose in the map frame (mm, rad), measured by scan matching on the dock
+    // and refined on every run. Invalidated whenever the map or the field changes.
+    bool loadDock(float& x, float& y, float& t, int& runs) const;
+    void saveDock(float x, float y, float t, int runs);
+    void removeDock();
 
     // -- Upload (PUT /api/floormap, chunked body) ------------------------------
     // beginUpload() opens a temp file; writeChunk() appends; endUpload()

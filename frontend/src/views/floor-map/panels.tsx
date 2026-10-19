@@ -160,6 +160,7 @@ interface CleanPanelProps {
 const PHASE_LABELS: Record<string, string> = {
     idle: "Ready",
     starting: "Starting...",
+    localizing: "Localizing...",
     running: "Cleaning rooms",
     returning: "Returning to dock",
     docking: "Docking",
@@ -245,7 +246,7 @@ export function CleanPanel({
                             {formatDuration(status.elapsed)}
                             {status.obstacles > 0 && ` · ${t("{count} obstacles", { count: status.obstacles })}`}
                             {status.localization === "map" &&
-                                ` · ${t("Map lock {score}%", { score: Math.round(status.locScore * 100) })}`}
+                                ` · ${t("Map lock {score}% · ±{mm} mm", { score: Math.round(status.locScore * 100), mm: status.locSpread ?? 0 })}`}
                         </span>
                     </div>
                     {(active || status.phase === "done") && (
@@ -263,7 +264,7 @@ export function CleanPanel({
                         type="button"
                         class={`floormap-btn${pending ? " pending" : ""}`}
                         onClick={onHome}
-                        disabled={pending || status?.phase !== "running"}
+                        disabled={pending || !status?.active || status.phase === "finishing"}
                     >
                         <T>Return to dock</T>
                     </button>

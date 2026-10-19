@@ -536,5 +536,17 @@
   "Docking was handed over to the robot.": "L'accostage a été confié au robot.",
   "Shortcuts": "Raccourcis",
   "The LIDAR wall map could not be loaded (not enough memory). The robot drives on odometry only.": "La carte LIDAR des murs n'a pas pu être chargée (mémoire insuffisante). Le robot se repère uniquement par odométrie.",
-  "No LIDAR wall map: the robot drives on odometry only and its position drifts. Pin a mapping run (badge LIDAR map) under Edit, Use another cleaning run.": "Pas de carte LIDAR : le robot se repère uniquement par odométrie et sa position dérive. Choisissez une cartographie (badge Carte LIDAR) sous Modifier, Utiliser un autre passage."
+  "No LIDAR wall map: the robot drives on odometry only and its position drifts. Pin a mapping run (badge LIDAR map) under Edit, Use another cleaning run.": "Pas de carte LIDAR : le robot se repère uniquement par odométrie et sa position dérive. Choisissez une cartographie (badge Carte LIDAR) sous Modifier, Utiliser un autre passage.",
+  "Localizing...": "Localisation...",
+  "start the robot on its dock": "Démarre le robot sur sa base",
+  "no LIDAR map: pin a mapping run first": "pas de carte LIDAR : épingle d’abord un passage de cartographie",
+  "the LIDAR map could not be loaded (not enough memory) - restart the ESP32": "la carte LIDAR n’a pas pu être chargée (mémoire insuffisante) - redémarre l’ESP32",
+  "the LIDAR delivers no usable scans (is the turret spinning?)": "le LIDAR ne fournit aucun scan exploitable (la tourelle tourne-t-elle ?)",
+  "position not found on the map - record a new mapping run": "position introuvable sur la carte - enregistre un nouveau passage de cartographie",
+  "lost: the position no longer matches the map": "perdu : la position ne correspond plus à la carte",
+  "docking handed over to the robot": "amarrage confié au robot",
+  "way home blocked - the robot docks itself": "chemin du retour bloqué - le robot s’amarre seul",
+  "a room clean is running": "un nettoyage de pièce est en cours",
+  "run took far too long": "le passage a duré beaucoup trop longtemps",
+  "Map lock {score}% · ±{mm} mm": "Calage carte {score}% · ±{mm} mm"
 }
