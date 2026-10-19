@@ -548,5 +548,10 @@
   "way home blocked - the robot docks itself": "Weg nach Hause blockiert - der Roboter dockt selbst an",
   "a room clean is running": "eine Raumreinigung läuft",
   "run took far too long": "Durchgang hat viel zu lange gedauert",
-  "Map lock {score}% · ±{mm} mm": "Kartenabgleich {score}% · ±{mm} mm"
+  "Map lock {score}% · ±{mm} mm": "Kartenabgleich {score}% · ±{mm} mm",
+  "The robot's transmit line is held low: its serial port is off (robot asleep?) or the wire has no contact.": "Die Sendeleitung des Roboters liegt dauerhaft auf Low: Die serielle Schnittstelle ist aus (Roboter im Ruhezustand?) oder das Kabel hat keinen Kontakt.",
+  "UART errors break / frame / overflow": "UART-Fehler Break / Frame / Überlauf",
+  "RX line while idle": "RX-Leitung im Ruhezustand",
+  "measuring...": "wird gemessen...",
+  "{pct} % low": "{pct} % Low"
 }

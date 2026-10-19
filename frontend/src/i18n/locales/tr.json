@@ -548,5 +548,10 @@
   "way home blocked - the robot docks itself": "eve dönüş yolu kapalı - robot kendisi yanaşıyor",
   "a room clean is running": "bir oda temizliği çalışıyor",
   "run took far too long": "tur çok uzun sürdü",
-  "Map lock {score}% · ±{mm} mm": "Harita eşleşmesi %{score} · ±{mm} mm"
+  "Map lock {score}% · ±{mm} mm": "Harita eşleşmesi %{score} · ±{mm} mm",
+  "The robot's transmit line is held low: its serial port is off (robot asleep?) or the wire has no contact.": "Robotun gönderim hattı sürekli düşük seviyede: seri port kapalı (robot uykuda mı?) ya da kablo temas etmiyor.",
+  "UART errors break / frame / overflow": "UART hataları break / çerçeve / taşma",
+  "RX line while idle": "Boştayken RX hattı",
+  "measuring...": "ölçülüyor...",
+  "{pct} % low": "%{pct} düşük"
 }

@@ -2,6 +2,7 @@
 #include "config.h"
 #include "json_fields.h"
 #include <climits>
+#include <driver/gpio.h>
 #include <memory>
 
 // -- Lifecycle ---------------------------------------------------------------
@@ -57,9 +58,121 @@ NeatoSerial::NeatoSerial() :
 #undef CACHE_HIT
 
 void NeatoSerial::begin(int txPin, int rxPin) {
+    this->txPin = txPin;
+    this->rxPin = rxPin;
     uart.setRxBufferSize(NEATO_UART_RX_BUFFER);
     uart.begin(NEATO_BAUD_RATE, SERIAL_8N1, rxPin, txPin);
+    // Runs on the Arduino UART event task: only count, never touch the queue
+    uart.onReceiveError([this](hardwareSerial_error_t err) {
+        if (err == UART_BREAK_ERROR)
+            uartBreaks = uartBreaks + 1;
+        else if (err == UART_FRAME_ERROR || err == UART_PARITY_ERROR)
+            uartFrameErrors = uartFrameErrors + 1;
+        else if (err == UART_FIFO_OVF_ERROR || err == UART_BUFFER_FULL_ERROR)
+            uartOverflows = uartOverflows + 1;
+    });
     LOG("NEATO", "UART initialized (TX=GPIO%d, RX=GPIO%d, baud=%d)", txPin, rxPin, NEATO_BAUD_RATE);
+}
+
+void NeatoSerial::recordRx(char c) {
+    rxBytes++;
+    lastRxAt = millis();
+    rawTail[rawTailPos] = c;
+    rawTailPos = (rawTailPos + 1) % NEATO_DIAG_RAW_TAIL;
+    if (rawTailPos == 0)
+        rawTailFull = true;
+}
+
+void NeatoSerial::sampleRxLine() {
+    unsigned long now = millis();
+    if (rxPin < 0 || now - rxSampleAt < NEATO_DIAG_RX_SAMPLE_MS)
+        return;
+    rxSampleAt = now;
+    if (rxWindowAt == 0)
+        rxWindowAt = now;
+    rxIdleSamples++;
+    if (gpio_get_level(static_cast<gpio_num_t>(rxPin)) == 0)
+        rxIdleLowSamples++;
+    if (now - rxWindowAt >= NEATO_DIAG_RX_WINDOW_MS) {
+        rxIdleLowPct = static_cast<int>(rxIdleLowSamples * 100 / rxIdleSamples);
+        rxIdleSamples = 0;
+        rxIdleLowSamples = 0;
+        rxWindowAt = now;
+    }
+}
+
+String NeatoSerial::rawTailEscaped() const {
+    String out;
+    uint16_t n = rawTailFull ? NEATO_DIAG_RAW_TAIL : rawTailPos;
+    uint16_t start = rawTailFull ? rawTailPos : 0;
+    out.reserve(n * 2);
+    for (uint16_t i = 0; i < n; i++) {
+        auto c = static_cast<uint8_t>(rawTail[(start + i) % NEATO_DIAG_RAW_TAIL]);
+        if (c == '\r') {
+            out += "\\r";
+        } else if (c == '\n') {
+            out += "\\n";
+        } else if (c == NEATO_RESPONSE_TERMINATOR) {
+            out += "^Z";
+        } else if (c == '\\') {
+            out += "\\\\";
+        } else if (c >= 0x20 && c < 0x7F) {
+            out += static_cast<char>(c);
+        } else {
+            char hex[5];
+            snprintf(hex, sizeof(hex), "\\x%02X", c);
+            out += hex;
+        }
+    }
+    return out;
+}
+
+// Diagnostics get shared: never show the SetEvent SKey
+static String redactSKey(const String& cmd) {
+    int at = cmd.indexOf(CMD_SET_EVENT_SKEY);
+    return at > 0 ? cmd.substring(0, at) + " SKey ***" : cmd;
+}
+
+static const char *statusName(uint8_t s) {
+    switch (static_cast<CommandStatus>(s)) {
+        case CMD_SUCCESS:
+            return "ok";
+        case CMD_TIMEOUT:
+            return "timeout";
+        case CMD_SERIAL_ERROR:
+            return "desync";
+        case CMD_UNSUPPORTED:
+            return "unsupported";
+        case CMD_QUEUE_FULL:
+            return "queueFull";
+        case CMD_PARSE_FAILED:
+            break;
+    }
+    return "error";
+}
+
+// The robot echoes each command, so received bytes can carry the SKey as well
+String NeatoSerial::redactEcho(String s) const {
+    if (sKey.length() > 0)
+        s.replace(sKey, "***");
+    return s;
+}
+
+String NeatoSerial::historyJson() const {
+    unsigned long now = millis();
+    String out = "[";
+    for (uint8_t i = 0; i < historyCount; i++) {
+        // Oldest first
+        const HistoryEntry& h = history[(historyPos + NEATO_DIAG_HISTORY - historyCount + i) % NEATO_DIAG_HISTORY];
+        if (i > 0)
+            out += ",";
+        out += fieldsToJson({{"cmd", h.cmd, FIELD_STRING},
+                             {"status", statusName(h.status), FIELD_STRING},
+                             {"ms", String(h.ms), FIELD_INT},
+                             {"bytes", String(h.bytes), FIELD_INT},
+                             {"agoS", String((now - h.at) / 1000), FIELD_INT}});
+    }
+    return out + "]";
 }
 
 void NeatoSerial::initSKey() {
@@ -153,7 +266,7 @@ String NeatoSerial::getDiagJson() const {
     std::vector<Field> stats = {
             {"queueDepth", String(queue.size()), FIELD_INT},
             {"state", queueStateName(state), FIELD_STRING},
-            {"current", currentCommand, FIELD_STRING},
+            {"current", redactSKey(currentCommand), FIELD_STRING},
             {"ok", String(statOk), FIELD_INT},
             {"timeouts", String(statTimeout), FIELD_INT},
             {"desyncs", String(statDesync), FIELD_INT},
@@ -165,9 +278,22 @@ String NeatoSerial::getDiagJson() const {
             {"lastFailCmd", lastFailCmd, FIELD_STRING},
             {"lastFailStatus", lastFailStatus, FIELD_STRING},
             {"lastFailAgoS", ago(lastFailAt), FIELD_INT},
-            {"lastFailPartial", lastFailPartial, FIELD_STRING},
+            {"lastFailPartial", redactEcho(lastFailPartial), FIELD_STRING},
     };
-    return "{\"identify\":" + fieldsToJson(ident) + ",\"serial\":" + fieldsToJson(stats) + "}";
+    std::vector<Field> link = {
+            {"txPin", String(txPin), FIELD_INT},
+            {"rxPin", String(rxPin), FIELD_INT},
+            {"baud", String(NEATO_BAUD_RATE), FIELD_INT},
+            {"rxLevel", rxPin >= 0 ? String(gpio_get_level(static_cast<gpio_num_t>(rxPin))) : String(-1), FIELD_INT},
+            {"rxIdleLowPct", String(rxIdleLowPct), FIELD_INT},
+            {"uartBreaks", String(uartBreaks), FIELD_INT},
+            {"uartFrameErrors", String(uartFrameErrors), FIELD_INT},
+            {"uartOverflows", String(uartOverflows), FIELD_INT},
+            {"staleBytes", String(staleBytes), FIELD_INT},
+            {"rawTail", redactEcho(rawTailEscaped()), FIELD_STRING},
+    };
+    return "{\"identify\":" + fieldsToJson(ident) + ",\"serial\":" + fieldsToJson(stats) +
+           ",\"link\":" + fieldsToJson(link) + ",\"history\":" + historyJson() + "}";
 }
 
 String NeatoSerial::buildSetEvent(const char *event) const {
@@ -194,6 +320,9 @@ void NeatoSerial::tick() {
         sKeyRetryAt = millis() + 1000;
     }
 
+    if ((state == QUEUE_IDLE || state == QUEUE_INTER_DELAY) && !uart.available())
+        sampleRxLine();
+
     switch (state) {
         case QUEUE_IDLE:
             if (!queue.empty()) {
@@ -209,8 +338,7 @@ void NeatoSerial::tick() {
             // Read all available bytes
             while (uart.available()) {
                 char c = static_cast<char>(uart.read());
-                rxBytes++;
-                lastRxAt = millis();
+                recordRx(c);
                 if (c == NEATO_RESPONSE_TERMINATOR) {
                     unsigned long elapsed = millis() - commandSentAt;
                     LOG("NEATO", "RX: %u bytes in %lu ms", responseBuffer.length(), elapsed);
@@ -310,9 +438,10 @@ void NeatoSerial::dequeueNext() {
 void NeatoSerial::flushUartRx() {
     int flushed = 0;
     while (uart.available()) {
-        uart.read();
+        recordRx(static_cast<char>(uart.read()));
         flushed++;
     }
+    staleBytes += flushed;
     if (flushed > 0) {
         LOG("NEATO", "Flushed %d stale bytes from UART RX", flushed);
     }
@@ -385,6 +514,15 @@ void NeatoSerial::completeCommand(CommandStatus status, const String& response) 
     state = QUEUE_INTER_DELAY;
 
     // Diagnostics (always on)
+    HistoryEntry& h = history[historyPos];
+    h.cmd = redactSKey(cmd).substring(0, 48);
+    h.status = static_cast<uint8_t>(status);
+    h.ms = static_cast<uint16_t>(elapsed > 65535 ? 65535 : elapsed);
+    h.bytes = static_cast<uint16_t>(respBytes > 65535 ? 65535 : respBytes);
+    h.at = millis();
+    historyPos = (historyPos + 1) % NEATO_DIAG_HISTORY;
+    if (historyCount < NEATO_DIAG_HISTORY)
+        historyCount++;
     lastStatus = status;
     if (status == CMD_SUCCESS) {
         statOk++;
@@ -396,7 +534,7 @@ void NeatoSerial::completeCommand(CommandStatus status, const String& response) 
             statDesync++;
         else if (status == CMD_UNSUPPORTED)
             statUnsupported++;
-        lastFailCmd = cmd;
+        lastFailCmd = redactSKey(cmd);
         lastFailStatus = status == CMD_TIMEOUT        ? "timeout"
                          : status == CMD_SERIAL_ERROR ? "desync"
                          : status == CMD_UNSUPPORTED  ? "unsupported"

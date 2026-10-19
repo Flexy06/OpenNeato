@@ -13,6 +13,12 @@ const AUTO_OPEN_S = 20;
 
 function hint(d: DiagData, t: ReturnType<typeof useI18n>["t"]): string {
     const s = d.serial;
+    // RX held low: the robot's serial output is switched off (robot asleep) or the wire has no contact
+    if (d.link.rxIdleLowPct > 50 || (d.link.uartBreaks > 0 && s.rxBytes === 0)) {
+        return t(
+            "The robot's transmit line is held low: its serial port is off (robot asleep?) or the wire has no contact.",
+        );
+    }
     if (s.rxBytes === 0 && d.identify.attempts > 0) {
         return t(
             "No data has arrived from the robot yet (0 bytes received). Check that the robot is switched on (press a button to wake it), the cable to the debug port and the UART pins (TX/RX swapped?).",
@@ -100,6 +106,21 @@ export function ConnectionDiag() {
                             </dt>
                             <dd>
                                 {d.serial.ok} / {d.serial.timeouts} / {d.serial.desyncs}
+                            </dd>
+                            <dt>
+                                <T>UART errors break / frame / overflow</T>
+                            </dt>
+                            <dd>
+                                {d.link.uartBreaks} / {d.link.uartFrameErrors} / {d.link.uartOverflows}
+                            </dd>
+                            <dt>
+                                <T>RX line while idle</T>
+                            </dt>
+                            <dd>
+                                {d.link.rxIdleLowPct < 0
+                                    ? t("measuring...")
+                                    : t("{pct} % low", { pct: d.link.rxIdleLowPct })}
+                                {` · GPIO ${d.link.rxPin}`}
                             </dd>
                             <dt>
                                 <T>Serial queue</T>

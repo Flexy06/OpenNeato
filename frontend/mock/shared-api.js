@@ -1001,6 +1001,24 @@ function mockDiag(state) {
             lastFailAgoS: identifying ? up % 8 : -1,
             lastFailPartial: "",
         },
+        link: {
+            txPin: 17,
+            rxPin: 16,
+            baud: 115200,
+            rxLevel: 1,
+            rxIdleLowPct: up < 10 ? -1 : 0,
+            uartBreaks: 0,
+            uartFrameErrors: 0,
+            uartOverflows: 0,
+            staleBytes: 0,
+            rawTail: identifying ? "" : "Time UTC,Mon Oct 20 08:12:03 2026\\r\\n^Z",
+        },
+        history: identifying
+            ? [{ cmd: "GetVersion", status: "timeout", ms: 3000, bytes: 0, agoS: up % 8 }]
+            : [
+                  { cmd: "GetErr", status: "ok", ms: 38, bytes: 24, agoS: 1 },
+                  { cmd: "GetState", status: "ok", ms: 41, bytes: 88, agoS: 0 },
+              ],
         esp: { uptimeS: up, resetReason: 1, freeHeap: 142000, minFreeHeap: 98000, maxAllocHeap: 65000 },
     };
 }

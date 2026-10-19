@@ -1126,7 +1126,7 @@ components:
   schemas:
     DiagData:
       type: object
-      required: [identify, serial, esp]
+      required: [identify, serial, link, history, esp]
       properties:
         identify:
           type: object
@@ -1161,6 +1161,26 @@ components:
             lastFailStatus: { type: string }
             lastFailAgoS: { type: integer }
             lastFailPartial: { type: string }
+        link:
+          type: object
+          description: UART link state - tells a silent robot from a dead or noisy line
+          required: [txPin, rxPin, baud, rxLevel, rxIdleLowPct, uartBreaks, uartFrameErrors, uartOverflows, staleBytes, rawTail]
+          properties:
+            txPin: { type: integer }
+            rxPin: { type: integer }
+            baud: { type: integer }
+            rxLevel: { type: integer, description: RX pin level right now (1 = idle high; the pin has its pull-up on) }
+            rxIdleLowPct: { type: integer, description: Share of idle samples with RX low in the last 10 s window (-1 = no window yet) }
+            uartBreaks: { type: integer, description: Break events - RX held low (robot TX off or no contact) }
+            uartFrameErrors: { type: integer, description: "Frame or parity errors: noise, floating line or wrong baud" }
+            uartOverflows: { type: integer }
+            staleBytes: { type: integer, description: Bytes that arrived outside a command }
+            rawTail: { type: string, description: "Last bytes received; CR, LF, Ctrl-Z and other control bytes escaped" }
+        history:
+          type: array
+          description: Last serial commands, oldest first
+          items:
+            $ref: "#/components/schemas/DiagCommand"
         esp:
           type: object
           required: [uptimeS, resetReason, freeHeap, minFreeHeap, maxAllocHeap]
@@ -1170,6 +1190,15 @@ components:
             freeHeap: { type: integer }
             minFreeHeap: { type: integer }
             maxAllocHeap: { type: integer }
+    DiagCommand:
+      type: object
+      required: [cmd, status, ms, bytes, agoS]
+      properties:
+        cmd: { type: string, description: Command (SKey redacted) }
+        status: { type: string, enum: [ok, timeout, desync, unsupported, queueFull, error] }
+        ms: { type: integer }
+        bytes: { type: integer, description: Response bytes }
+        agoS: { type: integer }
     Ok:
       type: object
       properties:

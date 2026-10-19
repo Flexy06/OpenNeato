@@ -2,6 +2,7 @@
 #include <cctype>
 // Host-side simulation of GuidedCleanManager against a physics model.
 // Build + run: ./run.sh   (see README.md in this folder)
+#include <algorithm>
 #include <cassert>
 #include <cstring>
 #include <set>
@@ -385,8 +386,17 @@ static Result runScenario(const char *name, const char *rooms, std::function<voi
 }
 
 int main(int argc, char **argv) {
-    char tmpl[] = "/tmp/guidedsimXXXXXX";
-    g_fsDir = mkdtemp(tmpl);
+#ifdef _WIN32
+    const char *tmpBase = std::getenv("TEMP"); // Native Windows build (MinGW): no /tmp
+#else
+    const char *tmpBase = std::getenv("TMPDIR");
+#endif
+    std::string tmpl = std::string(tmpBase && *tmpBase ? tmpBase : "/tmp") + "/guidedsimXXXXXX";
+    if (!mkdtemp(&tmpl[0])) {
+        std::perror("mkdtemp");
+        return 2;
+    }
+    g_fsDir = tmpl;
     Serial.enabled = argc > 1 && std::strcmp(argv[1], "-v") == 0;
     g_quietLog = !Serial.enabled;
     const char *only = argc > 2 ? argv[2] : nullptr;

@@ -188,6 +188,42 @@ private:
     String lastFailPartial;
     unsigned long lastFailAt = 0;
 
+    // Link diagnostics: tell "robot silent" from "line dead" from "line noisy".
+    // UART hardware events (counted on the Arduino UART event task).
+    int txPin = -1;
+    int rxPin = -1;
+    volatile uint32_t uartBreaks = 0; // RX held low for a whole frame: robot TX off or no contact
+    volatile uint32_t uartFrameErrors = 0; // Noise, floating line or wrong baud rate
+    volatile uint32_t uartOverflows = 0; // FIFO / ring buffer overflow
+    uint32_t staleBytes = 0; // Bytes that arrived outside a command (flushed)
+    // RX line level while the link is idle (no command in flight, nothing buffered).
+    // The RX pin has its pull-up on: an open line reads high, low means driven low.
+    uint32_t rxIdleSamples = 0;
+    uint32_t rxIdleLowSamples = 0;
+    int rxIdleLowPct = -1; // Of the last complete window (-1 = no window yet)
+    unsigned long rxSampleAt = 0;
+    unsigned long rxWindowAt = 0;
+    // Last bytes received from the robot (ring buffer), rendered escaped
+    char rawTail[NEATO_DIAG_RAW_TAIL];
+    uint16_t rawTailPos = 0;
+    bool rawTailFull = false;
+    // Last commands with outcome (ring buffer)
+    struct HistoryEntry {
+        String cmd;
+        uint8_t status;
+        uint16_t ms;
+        uint16_t bytes;
+        unsigned long at;
+    };
+    HistoryEntry history[NEATO_DIAG_HISTORY];
+    uint8_t historyPos = 0;
+    uint8_t historyCount = 0;
+    void recordRx(char c);
+    void sampleRxLine();
+    String rawTailEscaped() const;
+    String redactEcho(String s) const;
+    String historyJson() const;
+
     // Build a SetEvent command string: "SetEvent event <evt> SKey <sKey>"
     String buildSetEvent(const char *event) const;
 

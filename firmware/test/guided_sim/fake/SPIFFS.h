@@ -27,7 +27,8 @@ private:
     FILE *f_ = nullptr;
 };
 struct FakeFS {
-    File open(const char *p, const char *mode) { return File(fopen(fakeFsPath(p).c_str(), mode)); }
+    // Binary mode: a Windows host would otherwise rewrite \n as \r\n in the LIDAR field
+    File open(const char *p, const char *mode) { return File(fopen(fakeFsPath(p).c_str(), (std::string(mode) + "b").c_str())); }
     File open(const String& p, const char *mode) { return open(p.c_str(), mode); }
     bool exists(const char *p) { FILE *f = fopen(fakeFsPath(p).c_str(), "r"); if (f) fclose(f); return f != nullptr; }
     bool remove(const char *p) { return ::remove(fakeFsPath(p).c_str()) == 0; }
