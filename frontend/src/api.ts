@@ -221,6 +221,7 @@ export const api = {
     deleteFloorMap: () => del("/api/floormap"),
     getLocField: () => fetchLocField(),
     saveLocField: (data: Uint8Array) => putLocField(data),
+    deleteLocField: () => del("/api/floormap/field"),
     startMappingRun: () => post("/api/floormap/record"),
     getGuidedStatus: () => get<GuidedStatus>("/api/guided/status"),
     getGuidedTrace: () => fetchGuidedTrace(),

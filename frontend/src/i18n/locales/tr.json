@@ -534,5 +534,7 @@
   "Back on the dock.": "İstasyona geri döndü.",
   "Did not reach the dock: put it on the dock by hand.": "İstasyona ulaşamadı: robotu elle istasyona koyun.",
   "Docking was handed over to the robot.": "Yanaşma robota devredildi.",
-  "Shortcuts": "Kısayollar"
+  "Shortcuts": "Kısayollar",
+  "The LIDAR wall map could not be loaded (not enough memory). The robot drives on odometry only.": "LIDAR duvar haritası yüklenemedi (yetersiz bellek). Robot yalnızca odometriyle gidiyor.",
+  "No LIDAR wall map: the robot drives on odometry only and its position drifts. Pin a mapping run (badge LIDAR map) under Edit, Use another cleaning run.": "LIDAR duvar haritası yok: robot yalnızca odometriyle gidiyor ve konumu kayıyor. Düzenle altında Başka bir tur kullan ile bir haritalama turu (LIDAR haritası rozeti) seçin."
 }

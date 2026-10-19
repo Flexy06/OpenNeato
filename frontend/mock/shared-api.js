@@ -838,6 +838,11 @@ function createMockApi(context) {
             return { status: 200, headers: { "Content-Type": "application/octet-stream" }, body: state.floorField };
         }
 
+        if (method === "DELETE" && path === "/api/floormap/field") {
+            state.floorField = null;
+            return okResponse();
+        }
+
         if (method === "PUT" && path === "/api/floormap/field") {
             const bytes = await request.bytes();
             if (bytes.length < 26 || bytes[0] !== 0x4f || bytes[3] !== 0x31) {

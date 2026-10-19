@@ -567,6 +567,17 @@ void WebServer::registerGuidedRoutes() {
     // PUT /api/floormap/field — replace the localization field
     registerMapUpload("/api/floormap/field", true);
 
+    // DELETE /api/floormap/field — drop the localization field (the pinned run has no scans)
+    loggedRoute("/api/floormap/field", HTTP_DELETE, [this](AsyncWebServerRequest *request) -> int {
+        if (guidedMgr.isActive()) {
+            sendError(request, 409, "guided clean is running");
+            return 409;
+        }
+        floorMap.removeField();
+        sendOk(request);
+        return 200;
+    });
+
     // POST /api/floormap/record — mapping run: house clean that records LIDAR scans
     loggedRoute("/api/floormap/record", HTTP_POST, [this](AsyncWebServerRequest *request) -> int {
         if (guidedMgr.isActive() || manualMgr.isActive()) {

@@ -138,17 +138,22 @@ static bool parseField(File& f, LocField& out) {
     if (out.cell < 10 || out.w == 0 || out.h == 0 || n + FIELD_HEADER > FLOORMAP_FIELD_MAX_BYTES)
         return false;
 #if defined(ARDUINO_ARCH_ESP32)
-    // One contiguous block; refuse instead of crashing on a fragmented heap
-    if (ESP.getMaxAllocHeap() < n + 16384) {
-        LOG("FMAP", "Localization field (%u bytes) does not fit in heap (max block %u)", static_cast<unsigned>(n),
-            static_cast<unsigned>(ESP.getMaxAllocHeap()));
+    // Row-wise storage needs no big block, only enough heap in total
+    if (ESP.getFreeHeap() < n + n / 8 + 40000) {
+        LOG("FMAP", "Localization field (%u bytes) does not fit in heap (free %u)", static_cast<unsigned>(n),
+            static_cast<unsigned>(ESP.getFreeHeap()));
         return false;
     }
 #endif
-    out.data.resize(n);
-    if (f.read(out.data.data(), n) != static_cast<int>(n)) {
-        std::vector<uint8_t>().swap(out.data);
-        return false;
+    out.rows.clear();
+    out.rows.reserve(static_cast<size_t>(out.h));
+    for (int y = 0; y < out.h; y++) {
+        std::vector<uint8_t> row(static_cast<size_t>(out.w));
+        if (f.read(row.data(), row.size()) != static_cast<int>(row.size())) {
+            std::vector<std::vector<uint8_t>>().swap(out.rows);
+            return false;
+        }
+        out.rows.push_back(std::move(row));
     }
     return true;
 }
@@ -190,6 +195,14 @@ bool FloorMap::remove() {
         SPIFFS.remove(FLOORMAP_FIELD_FILE);
     dataLogger.logGuided("map_deleted");
     LOG("MAP", "Floor map deleted");
+    return true;
+}
+
+bool FloorMap::removeField() {
+    if (!SPIFFS.exists(FLOORMAP_FIELD_FILE))
+        return false;
+    SPIFFS.remove(FLOORMAP_FIELD_FILE);
+    LOG("MAP", "Localization field deleted");
     return true;
 }
 

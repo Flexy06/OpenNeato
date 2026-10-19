@@ -250,6 +250,7 @@ private:
 
     // -- LIDAR localization against the mapping-run field ----------------------------
     LocField field;
+    bool fieldLoadFailed = false; // A field exists but could not be loaded (memory)
     bool locInit = false;
     bool bootChecked = false;
     int locFixes = 0;

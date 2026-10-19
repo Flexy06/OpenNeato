@@ -189,6 +189,21 @@ export function CleanPanel({
 
     return (
         <div class="floormap-panel">
+            {status && !active && status.locMap !== "ready" && (
+                <div class="floormap-warn" role="status">
+                    {status.locMap === "failed" ? (
+                        <T>
+                            The LIDAR wall map could not be loaded (not enough memory). The robot drives on odometry
+                            only.
+                        </T>
+                    ) : (
+                        <T>
+                            No LIDAR wall map: the robot drives on odometry only and its position drifts. Pin a mapping
+                            run (badge LIDAR map) under Edit, Use another cleaning run.
+                        </T>
+                    )}
+                </div>
+            )}
             {map.rooms.length === 0 ? (
                 <div class="floormap-note">
                     <T>No rooms yet. Switch to Edit and draw your rooms on the map.</T>

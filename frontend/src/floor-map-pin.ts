@@ -24,6 +24,8 @@ export async function pinSession(name: string, session: MapData, previous?: Floo
     await new Promise((r) => setTimeout(r, 0));
     const loc = session.scans.length > 0 ? buildLocMap(session.scans) : null;
     await api.saveFloorMap(doc);
+    // A field from another run is in a different coordinate frame: never keep it
     if (loc) await api.saveLocField(serializeLocMap(loc));
+    else await api.deleteLocField();
     return { map, doc, loc };
 }

@@ -57,9 +57,17 @@ struct LocField {
     int lidarSign = 1;
     float lidarAngleOffsetRad = 0.0f;
     int lidarOffsetX = 0;
-    std::vector<uint8_t> data;
+    // One allocation per row: a 40-70 KB field never needs one big contiguous
+    // block (the ESP32 heap rarely has one after WiFi + web server start)
+    std::vector<std::vector<uint8_t>> rows;
 
-    bool valid() const { return w > 0 && h > 0 && data.size() == static_cast<size_t>(w) * static_cast<size_t>(h); }
+    bool valid() const { return w > 0 && h > 0 && rows.size() == static_cast<size_t>(h); }
+    // Cell value (0 outside)
+    uint8_t cellv(int cx, int cy) const {
+        if (cx < 0 || cy < 0 || cx >= w || cy >= h)
+            return 0;
+        return rows[static_cast<size_t>(cy)][static_cast<size_t>(cx)];
+    }
     // Field value at a world point (0 outside)
     bool inside(float x, float y) const {
         return x >= static_cast<float>(originX) && y >= static_cast<float>(originY) &&
@@ -68,9 +76,7 @@ struct LocField {
     uint8_t at(float x, float y) const {
         int cx = static_cast<int>(floorf((x - static_cast<float>(originX)) / static_cast<float>(cell)));
         int cy = static_cast<int>(floorf((y - static_cast<float>(originY)) / static_cast<float>(cell)));
-        if (cx < 0 || cy < 0 || cx >= w || cy >= h)
-            return 0;
-        return data[static_cast<size_t>(cy) * static_cast<size_t>(w) + static_cast<size_t>(cx)];
+        return cellv(cx, cy);
     }
 };
 
@@ -113,6 +119,8 @@ public:
 
     // Remove the stored map. Returns false if none existed.
     bool remove();
+    // Drop only the localization field (pinned a run without LIDAR scans)
+    bool removeField();
 
     // -- Upload (PUT /api/floormap, chunked body) ------------------------------
     // beginUpload() opens a temp file; writeChunk() appends; endUpload()

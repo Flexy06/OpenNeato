@@ -177,8 +177,11 @@ String GuidedCleanManager::buildPlan(const FloorMapData& map, const String& room
 
     nogos = map.nogos;
     // The localization field doubles as the free-space map for lanes and planning
-    if (!floorMap.loadField(field))
+    fieldLoadFailed = false;
+    if (!floorMap.loadField(field)) {
+        fieldLoadFailed = floorMap.hasField();
         field = LocField();
+    }
 
     // The dock is the map origin; refuse plans that start inside a no-go zone
     if (nearNogo(0.0f, 0.0f))
@@ -2180,9 +2183,7 @@ bool GuidedCleanManager::matchField(const LdsScanData& scan, int radiusMM, int a
                 for (int i = 0; i < n; i++) {
                     int cx = bx[i] + kx;
                     int cy = by[i] + ky;
-                    if (cx < 0 || cy < 0 || cx >= field.w || cy >= field.h)
-                        continue;
-                    sum += field.data[static_cast<size_t>(cy) * static_cast<size_t>(field.w) + static_cast<size_t>(cx)];
+                    sum += field.cellv(cx, cy);
                 }
                 // Slight preference for small corrections breaks ties on repetitive walls
                 float score = static_cast<float>(sum) - static_cast<float>(abs(kx) + abs(ky) + abs(da) / 2) * 2.0f;
@@ -2204,11 +2205,7 @@ bool GuidedCleanManager::matchField(const LdsScanData& scan, int radiusMM, int a
         int y0 = static_cast<int>(floorf(fy));
         float tx = fx - static_cast<float>(x0);
         float ty = fy - static_cast<float>(y0);
-        auto v = [this](int cx, int cy) -> float {
-            if (cx < 0 || cy < 0 || cx >= field.w || cy >= field.h)
-                return 0.0f;
-            return field.data[static_cast<size_t>(cy) * static_cast<size_t>(field.w) + static_cast<size_t>(cx)];
-        };
+        auto v = [this](int cx, int cy) -> float { return static_cast<float>(field.cellv(cx, cy)); };
         return (v(x0, y0) * (1 - tx) + v(x0 + 1, y0) * tx) * (1 - ty) +
                (v(x0, y0 + 1) * (1 - tx) + v(x0 + 1, y0 + 1) * tx) * ty;
     };
@@ -2471,6 +2468,11 @@ String GuidedCleanManager::getStatusJson() const {
             {"phase", phaseName(phase), FIELD_STRING},
             {"active", isActive() ? "true" : "false", FIELD_BOOL},
             {"hasMap", floorMap.hasMap() ? "true" : "false", FIELD_BOOL},
+            {"locMap",
+             !floorMap.hasField() ? "none"
+             : fieldLoadFailed    ? "failed"
+                                  : "ready",
+             FIELD_STRING},
             {"rooms", roomsLabel, FIELD_STRING},
             {"x", String(poseX / 1000.0f, 3), FIELD_FLOAT},
             {"y", String(poseY / 1000.0f, 3), FIELD_FLOAT},

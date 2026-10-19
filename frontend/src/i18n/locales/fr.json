@@ -534,5 +534,7 @@
   "Back on the dock.": "De retour sur la base.",
   "Did not reach the dock: put it on the dock by hand.": "Base non atteinte : posez le robot sur la base à la main.",
   "Docking was handed over to the robot.": "L'accostage a été confié au robot.",
-  "Shortcuts": "Raccourcis"
+  "Shortcuts": "Raccourcis",
+  "The LIDAR wall map could not be loaded (not enough memory). The robot drives on odometry only.": "La carte LIDAR des murs n'a pas pu être chargée (mémoire insuffisante). Le robot se repère uniquement par odométrie.",
+  "No LIDAR wall map: the robot drives on odometry only and its position drifts. Pin a mapping run (badge LIDAR map) under Edit, Use another cleaning run.": "Pas de carte LIDAR : le robot se repère uniquement par odométrie et sa position dérive. Choisissez une cartographie (badge Carte LIDAR) sous Modifier, Utiliser un autre passage."
 }

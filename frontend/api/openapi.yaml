@@ -979,6 +979,13 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+    delete:
+      tags:
+        - Guided
+      summary: Delete the LIDAR localization field (the pinned run has no scans)
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
     put:
       tags:
         - Guided
@@ -1577,6 +1584,10 @@ components:
         hasMap:
           type: boolean
           description: A floor map is stored
+        locMap:
+          type: string
+          enum: [none, ready, failed]
+          description: LIDAR wall map for localization - none stored, ready, or stored but not loadable (memory)
         rooms:
           type: string
           description: Room ids requested for the current/last run ("" = all)

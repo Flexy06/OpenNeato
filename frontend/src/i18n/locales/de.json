@@ -534,5 +534,7 @@
   "Back on the dock.": "Wieder an der Ladestation.",
   "Did not reach the dock: put it on the dock by hand.": "Ladestation nicht erreicht: bitte von Hand auf die Station stellen.",
   "Docking was handed over to the robot.": "Das Andocken wurde an den Roboter übergeben.",
-  "Shortcuts": "Schnellzugriff"
+  "Shortcuts": "Schnellzugriff",
+  "The LIDAR wall map could not be loaded (not enough memory). The robot drives on odometry only.": "Die LIDAR-Wandkarte konnte nicht geladen werden (zu wenig Speicher). Der Roboter fährt nur nach Radumdrehungen.",
+  "No LIDAR wall map: the robot drives on odometry only and its position drifts. Pin a mapping run (badge LIDAR map) under Edit, Use another cleaning run.": "Keine LIDAR-Wandkarte: Der Roboter fährt nur nach Radumdrehungen, seine Position driftet. Lege unter Bearbeiten → „Anderen Durchgang verwenden“ eine Kartierungsfahrt mit dem Abzeichen „LIDAR-Karte“ fest."
 }

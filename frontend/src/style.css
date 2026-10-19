@@ -4165,3 +4165,13 @@ body {
 .manual-map-warn {
     color: var(--text);
 }
+
+.floormap-warn {
+    padding: 10px 12px;
+    border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--amber) 10%, transparent);
+    color: var(--text);
+    font-size: 13px;
+    line-height: 1.45;
+}

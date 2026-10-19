@@ -194,6 +194,7 @@ function guidedStatus(state, hasMap, now) {
         phase: "idle",
         active: false,
         hasMap,
+        locMap: state.floorField ? "ready" : "none",
         rooms: "",
         x: 0,
         y: 0,
