@@ -44,6 +44,9 @@ private val Dark = darkColorScheme(
     surfaceContainerHighest = Color(0xFF2A332D),
     outline = Color(0xFF4A524C),
     outlineVariant = Color(0xFF2A302C),
+    inverseSurface = Color(0xFFEEE9E1),
+    inverseOnSurface = Color(0xFF292C2A),
+    inversePrimary = Color(0xFF244D43),
 )
 
 private val Light = lightColorScheme(
@@ -74,6 +77,9 @@ private val Light = lightColorScheme(
     surfaceContainerHighest = Color(0xFFEDE4DA),
     outline = Color(0xFFBDB8B0),
     outlineVariant = Color(0xFFE2DAD0),
+    inverseSurface = Color(0xFF292C2A),
+    inverseOnSurface = Color(0xFFF2EAE2),
+    inversePrimary = Color(0xFF9CC8B2),
 )
 
 // Status hues (green success, amber warning, terracotta error, blue connection)

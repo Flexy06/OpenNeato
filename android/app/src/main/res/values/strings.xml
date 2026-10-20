@@ -88,4 +88,18 @@
     <string name="lidar_unavailable">LIDAR unavailable</string>
     <string name="lidar_low_quality">Low quality (%1$d/360)</string>
     <string name="lidar_slow">Slow LDS (%1$.1f Hz)</string>
+    <string name="schedule">Schedule</string>
+    <string name="schedule_desc">Automatically clean on set days and times</string>
+    <string name="schedule_tz">Robot time %1$s · time zone %2$s</string>
+    <string name="schedule_loading">Loading schedule…</string>
+    <string name="schedule_add_slot">Add a second time</string>
+    <string name="schedule_remove_slot">Remove the second time</string>
+    <string name="schedule_saved">Schedule saved</string>
+    <string name="schedule_save_failed">Failed to save schedule: %1$s</string>
+    <string name="save">Save</string>
+    <string name="saving">Saving…</string>
+    <string name="cancel">Cancel</string>
+    <string name="ok">OK</string>
+    <string name="discard">Discard</string>
+    <string name="unsaved_changes">You have unsaved changes. Discard them?</string>
 </resources>

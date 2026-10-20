@@ -14,9 +14,13 @@ import io.github.flexy06.openneato.api.models.FirmwareVersion
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 
 // Thin wrapper around the generated API classes: one set per robot base URL,
@@ -62,6 +66,23 @@ class RobotClient {
             FirmwareApi(baseUrl, quick).apiFirmwareVersionGet()
         }
     }.getOrNull()?.takeIf { it.name == "OpenNeato" }
+
+    // Settings as a raw JSON object and partial updates: PUT /api/settings takes only the
+    // changed keys (like the web UI), the generated client would send every setting back
+    // (needless NVS writes, and it would overwrite changes made meanwhile elsewhere).
+    suspend fun settingsJson(baseUrl: String): JsonObject = request(Request.Builder().url("$baseUrl/api/settings").get())
+
+    suspend fun patchSettings(baseUrl: String, patch: JsonObject): JsonObject = request(
+        Request.Builder().url("$baseUrl/api/settings").put(patch.toString().toRequestBody("application/json".toMediaType())),
+    )
+
+    private suspend fun request(builder: Request.Builder): JsonObject = withContext(Dispatchers.IO) {
+        http.newCall(builder.build()).execute().use { res ->
+            val text = res.body?.string().orEmpty()
+            if (!res.isSuccessful) throw RobotException(errorMessage(text) ?: "HTTP ${res.code}", res.code)
+            Json.parseToJsonElement(text).jsonObject
+        }
+    }
 
     private fun errorMessage(body: Any?): String? {
         val text = body as? String ?: return null

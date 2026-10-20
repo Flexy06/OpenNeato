@@ -17,6 +17,7 @@ import androidx.navigation.compose.rememberNavController
 import io.github.flexy06.openneato.ui.connect.ConnectScreen
 import io.github.flexy06.openneato.ui.dashboard.DashboardScreen
 import io.github.flexy06.openneato.ui.manual.ManualScreen
+import io.github.flexy06.openneato.ui.schedule.ScheduleScreen
 import io.github.flexy06.openneato.ui.theme.OpenNeatoTheme
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.take
@@ -25,6 +26,7 @@ private object Routes {
     const val CONNECT = "connect"
     const val DASHBOARD = "dashboard"
     const val MANUAL = "manual"
+    const val SCHEDULE = "schedule"
 }
 
 class MainActivity : ComponentActivity() {
@@ -59,10 +61,14 @@ private fun AppNav(nav: NavHostController, start: String) {
                     nav.navigate(Routes.CONNECT) { popUpTo(Routes.DASHBOARD) { inclusive = true } }
                 },
                 onOpenManual = { nav.navigate(Routes.MANUAL) },
+                onOpenSchedule = { nav.navigate(Routes.SCHEDULE) },
             )
         }
         composable(Routes.MANUAL) {
             ManualScreen(onBack = { nav.popBackStack() })
+        }
+        composable(Routes.SCHEDULE) {
+            ScheduleScreen(onBack = { nav.popBackStack() })
         }
     }
 }

@@ -87,4 +87,18 @@
     <string name="lidar_unavailable">LIDAR nicht verfügbar</string>
     <string name="lidar_low_quality">Niedrige Qualität (%1$d/360)</string>
     <string name="lidar_slow">Langsames LDS (%1$.1f Hz)</string>
+    <string name="schedule">Zeitplan</string>
+    <string name="schedule_desc">An festgelegten Tagen und Uhrzeiten automatisch reinigen</string>
+    <string name="schedule_tz">Roboterzeit %1$s · Zeitzone %2$s</string>
+    <string name="schedule_loading">Zeitplan wird geladen…</string>
+    <string name="schedule_add_slot">Zweite Uhrzeit hinzufügen</string>
+    <string name="schedule_remove_slot">Zweite Uhrzeit entfernen</string>
+    <string name="schedule_saved">Zeitplan gespeichert</string>
+    <string name="schedule_save_failed">Zeitplan konnte nicht gespeichert werden: %1$s</string>
+    <string name="save">Speichern</string>
+    <string name="saving">Wird gespeichert…</string>
+    <string name="cancel">Abbrechen</string>
+    <string name="ok">OK</string>
+    <string name="discard">Verwerfen</string>
+    <string name="unsaved_changes">Es gibt ungespeicherte Änderungen. Verwerfen?</string>
 </resources>

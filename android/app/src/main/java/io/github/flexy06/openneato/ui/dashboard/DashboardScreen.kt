@@ -80,7 +80,12 @@ import io.github.flexy06.openneato.api.models.SystemData
 import io.github.flexy06.openneato.ui.theme.LocalStatusColors
 
 @Composable
-fun DashboardScreen(onChangeRobot: () -> Unit, onOpenManual: () -> Unit, vm: DashboardViewModel = viewModel()) {
+fun DashboardScreen(
+    onChangeRobot: () -> Unit,
+    onOpenManual: () -> Unit,
+    onOpenSchedule: () -> Unit,
+    vm: DashboardViewModel = viewModel(),
+) {
     val ui by vm.ui.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
@@ -127,9 +132,9 @@ fun DashboardScreen(onChangeRobot: () -> Unit, onOpenManual: () -> Unit, vm: Das
                     robotError?.let { RobotErrorBanner(it) }
                     Hero(ui, flags, docked)
                     d.schedule.data?.takeIf { it.enabled }?.let {
-                        ScheduleCard(it, ui.skipPending, vm::toggleSkipNextClean)
+                        ScheduleCard(it, ui.skipPending, vm::toggleSkipNextClean, onOpenSchedule)
                     }
-                    Shortcuts(onOpenManual)
+                    Shortcuts(onOpenManual, onOpenSchedule)
                     d.system.data?.let { StatusRow(it, d.firmware.data?.version) }
                 }
             }
@@ -328,7 +333,7 @@ private fun dayName(day: ScheduleTime.Day): String = stringResource(
 )
 
 @Composable
-private fun ScheduleCard(s: ScheduleNextData, busy: Boolean, onToggleSkip: () -> Unit) {
+private fun ScheduleCard(s: ScheduleNextData, busy: Boolean, onToggleSkip: () -> Unit, onOpen: () -> Unit) {
     val next = s.next
     val label = if (next != null) {
         val day = when (next.dayOffset) {
@@ -341,6 +346,7 @@ private fun ScheduleCard(s: ScheduleNextData, busy: Boolean, onToggleSkip: () ->
         stringResource(R.string.schedule_enabled)
     }
     Card(
+        onClick = onOpen,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -446,9 +452,10 @@ private fun actionIcon(a: Action): ImageVector = when (a) {
 
 // Entry points to the other screens (more follow as they are built)
 @Composable
-private fun Shortcuts(onOpenManual: () -> Unit) {
+private fun Shortcuts(onOpenManual: () -> Unit, onOpenSchedule: () -> Unit) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Shortcut(Icons.Filled.Gamepad, stringResource(R.string.manual_drive), onOpenManual, Modifier.weight(1f))
+        Shortcut(Icons.Filled.Gamepad, stringResource(R.string.manual), onOpenManual, Modifier.weight(1f))
+        Shortcut(Icons.Filled.Schedule, stringResource(R.string.schedule), onOpenSchedule, Modifier.weight(1f))
     }
 }
 
