@@ -111,6 +111,7 @@ class DashboardViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun run(action: Action) {
+        if (action == Action.MANUAL) return
         val url = robotUrl.value ?: return
         pendingFrom = ui.value.data.state.data?.uiState
         pending.value = true
@@ -125,6 +126,7 @@ class DashboardViewModel(app: Application) : AndroidViewModel(app) {
                         Action.STOP -> actions.apiCleanPost(ActionApiCleanPost.STOP)
                         Action.GUIDED_HOME -> guided.apiGuidedPost(ActionApiGuidedPost.HOME)
                         Action.GUIDED_STOP -> guided.apiGuidedPost(ActionApiGuidedPost.STOP)
+                        Action.MANUAL -> Unit // Navigation only, handled by the screen
                     }
                 }
                 delay(10000)

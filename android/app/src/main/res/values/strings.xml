@@ -65,4 +65,27 @@
     <string name="wifi_good">Good</string>
     <string name="wifi_fair">Fair</string>
     <string name="wifi_weak">Weak</string>
+    <string name="back">Back</string>
+    <string name="shortcuts">Shortcuts</string>
+    <string name="manual">Manual</string>
+    <string name="manual_drive">Drive manually</string>
+    <string name="manual_start">Start manual mode</string>
+    <string name="manual_starting">Starting manual mode…</string>
+    <string name="manual_not_active">Not in manual mode</string>
+    <string name="manual_blocked">The robot is busy. Stop the current run first.</string>
+    <string name="motor_brush">Brush</string>
+    <string name="motor_vacuum">Vacuum</string>
+    <string name="motor_side_brush">Side brush</string>
+    <string name="motor_all">All</string>
+    <string name="warn_lifted">Robot is lifted</string>
+    <string name="warn_stall_front">Stall detected – reverse to clear</string>
+    <string name="warn_stall_rear">Stall detected – move forward to clear</string>
+    <string name="warn_bumper">Bumper: %1$s – reverse to clear</string>
+    <string name="bumper_front_left">front left</string>
+    <string name="bumper_front_right">front right</string>
+    <string name="bumper_side_left">side left</string>
+    <string name="bumper_side_right">side right</string>
+    <string name="lidar_unavailable">LIDAR unavailable</string>
+    <string name="lidar_low_quality">Low quality (%1$d/360)</string>
+    <string name="lidar_slow">Slow LDS (%1$.1f Hz)</string>
 </resources>

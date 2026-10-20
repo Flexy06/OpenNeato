@@ -77,13 +77,15 @@ fun clockOf(localTime: String): String =
         ?: localTime
 
 // The three buttons of the bottom bar, depending on what the robot does
-enum class Action { HOUSE, SPOT, PAUSE, RESUME, DOCK, STOP, GUIDED_HOME, GUIDED_STOP }
+// MANUAL opens the driving screen (the robot is already in manual mode)
+enum class Action { HOUSE, SPOT, PAUSE, RESUME, DOCK, STOP, GUIDED_HOME, GUIDED_STOP, MANUAL }
 
 data class ActionButton(val action: Action, val enabled: Boolean, val primary: Boolean = false)
 
 fun actionButtons(f: RobotFlags, docked: Boolean, ready: Boolean, busy: Boolean, robotError: Boolean): List<ActionButton> {
     val ok = ready && !busy
     return when {
+        f.manual -> listOf(ActionButton(Action.MANUAL, ready, primary = true))
         f.guided -> listOf(
             ActionButton(Action.GUIDED_HOME, ok, primary = true),
             ActionButton(Action.GUIDED_STOP, ok),

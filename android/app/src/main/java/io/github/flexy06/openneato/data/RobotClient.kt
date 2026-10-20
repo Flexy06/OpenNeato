@@ -3,6 +3,7 @@ package io.github.flexy06.openneato.data
 import io.github.flexy06.openneato.api.apis.ActionsApi
 import io.github.flexy06.openneato.api.apis.FirmwareApi
 import io.github.flexy06.openneato.api.apis.GuidedApi
+import io.github.flexy06.openneato.api.apis.ManualApi
 import io.github.flexy06.openneato.api.apis.SensorsApi
 import io.github.flexy06.openneato.api.apis.SystemApi
 import io.github.flexy06.openneato.api.infrastructure.ClientError
@@ -33,6 +34,7 @@ class RobotClient {
         val system = SystemApi(baseUrl, http)
         val firmware = FirmwareApi(baseUrl, http)
         val guided = GuidedApi(baseUrl, http)
+        val manual = ManualApi(baseUrl, http)
     }
 
     @Volatile

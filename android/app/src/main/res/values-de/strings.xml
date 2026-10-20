@@ -64,4 +64,27 @@
     <string name="wifi_good">Gut</string>
     <string name="wifi_fair">Ausreichend</string>
     <string name="wifi_weak">Schwach</string>
+    <string name="back">Zurück</string>
+    <string name="shortcuts">Schnellzugriff</string>
+    <string name="manual">Manuell</string>
+    <string name="manual_drive">Manuell fahren</string>
+    <string name="manual_start">Manuellen Modus starten</string>
+    <string name="manual_starting">Manueller Modus wird gestartet…</string>
+    <string name="manual_not_active">Nicht im manuellen Modus</string>
+    <string name="manual_blocked">Der Roboter ist beschäftigt. Zuerst den laufenden Vorgang beenden.</string>
+    <string name="motor_brush">Bürste</string>
+    <string name="motor_vacuum">Saugmotor</string>
+    <string name="motor_side_brush">Seitenbürste</string>
+    <string name="motor_all">Alle</string>
+    <string name="warn_lifted">Roboter wurde angehoben</string>
+    <string name="warn_stall_front">Blockierung erkannt – zum Lösen rückwärts fahren</string>
+    <string name="warn_stall_rear">Blockierung erkannt – zum Lösen vorwärts fahren</string>
+    <string name="warn_bumper">Stoßfänger: %1$s – zum Lösen rückwärts fahren</string>
+    <string name="bumper_front_left">vorne links</string>
+    <string name="bumper_front_right">vorne rechts</string>
+    <string name="bumper_side_left">seitlich links</string>
+    <string name="bumper_side_right">seitlich rechts</string>
+    <string name="lidar_unavailable">LIDAR nicht verfügbar</string>
+    <string name="lidar_low_quality">Niedrige Qualität (%1$d/360)</string>
+    <string name="lidar_slow">Langsames LDS (%1$.1f Hz)</string>
 </resources>

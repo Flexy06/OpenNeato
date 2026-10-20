@@ -12,6 +12,8 @@ const textEncoder = new TextEncoder();
 
 const defaultRand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// Boolean query flags like the firmware: "1"/"0" from the web UI, "true"/"false" from the Android app
+const flag = (v) => v === "1" || String(v).toLowerCase() === "true";
 
 const TZ_TO_IANA = {
     UTC0: "UTC",
@@ -539,9 +541,9 @@ function createMockApi(context) {
         if (method === "POST" && path === "/api/manual/motors") {
             if (faults.actions) return errorResponse("UART timeout: robot not responding", 500);
             if (!state.manualClean) return errorResponse("Not in manual mode", 400);
-            state.manualBrush = query.brush === "1";
-            state.manualVacuum = query.vacuum === "1";
-            state.manualSideBrush = query.sideBrush === "1";
+            state.manualBrush = flag(query.brush);
+            state.manualVacuum = flag(query.vacuum);
+            state.manualSideBrush = flag(query.sideBrush);
             await sleep(600);
             return okResponse();
         }
@@ -565,7 +567,7 @@ function createMockApi(context) {
 
         if (method === "POST" && path === "/api/manual") {
             if (faults.actions) return errorResponse("UART timeout: robot not responding", 500);
-            const enable = query.enable === "1";
+            const enable = flag(query.enable);
             state.manualClean = enable;
             if (enable) {
                 state.cleaning = false;

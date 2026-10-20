@@ -80,7 +80,7 @@ import io.github.flexy06.openneato.api.models.SystemData
 import io.github.flexy06.openneato.ui.theme.LocalStatusColors
 
 @Composable
-fun DashboardScreen(onChangeRobot: () -> Unit, vm: DashboardViewModel = viewModel()) {
+fun DashboardScreen(onChangeRobot: () -> Unit, onOpenManual: () -> Unit, vm: DashboardViewModel = viewModel()) {
     val ui by vm.ui.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
@@ -107,7 +107,7 @@ fun DashboardScreen(onChangeRobot: () -> Unit, vm: DashboardViewModel = viewMode
                         busy = ui.pending,
                         robotError = robotError?.kind == ErrorData.Kind.ERROR,
                     ),
-                    onAction = vm::run,
+                    onAction = { if (it == Action.MANUAL) onOpenManual() else vm.run(it) },
                 )
             }
         },
@@ -129,6 +129,7 @@ fun DashboardScreen(onChangeRobot: () -> Unit, vm: DashboardViewModel = viewMode
                     d.schedule.data?.takeIf { it.enabled }?.let {
                         ScheduleCard(it, ui.skipPending, vm::toggleSkipNextClean)
                     }
+                    Shortcuts(onOpenManual)
                     d.system.data?.let { StatusRow(it, d.firmware.data?.version) }
                 }
             }
@@ -430,6 +431,7 @@ private fun actionLabel(a: Action): Int = when (a) {
     Action.RESUME -> R.string.action_resume
     Action.DOCK, Action.GUIDED_HOME -> R.string.action_dock
     Action.STOP, Action.GUIDED_STOP -> R.string.action_stop
+    Action.MANUAL -> R.string.manual
 }
 
 private fun actionIcon(a: Action): ImageVector = when (a) {
@@ -439,6 +441,30 @@ private fun actionIcon(a: Action): ImageVector = when (a) {
     Action.RESUME -> Icons.Filled.PlayArrow
     Action.DOCK, Action.GUIDED_HOME -> Icons.Filled.EvStation
     Action.STOP, Action.GUIDED_STOP -> Icons.Filled.Stop
+    Action.MANUAL -> Icons.Filled.Gamepad
+}
+
+// Entry points to the other screens (more follow as they are built)
+@Composable
+private fun Shortcuts(onOpenManual: () -> Unit) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Shortcut(Icons.Filled.Gamepad, stringResource(R.string.manual_drive), onOpenManual, Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun Shortcut(icon: ImageVector, label: String, onClick: () -> Unit, modifier: Modifier) {
+    Card(
+        onClick = onClick,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        modifier = modifier,
+    ) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
+            Spacer(Modifier.width(12.dp))
+            Text(label, style = MaterialTheme.typography.titleSmall)
+        }
+    }
 }
 
 @Composable

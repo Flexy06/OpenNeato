@@ -128,7 +128,8 @@ namespace detail {
     T paramConvert(const String& value);
     template<>
     inline bool paramConvert<bool>(const String& value) {
-        return value.toInt() != 0;
+        // "1"/"0" from the web UI, "true"/"false" from OpenAPI-generated clients (Android app)
+        return value.equalsIgnoreCase("true") || value.toInt() != 0;
     }
     template<>
     inline int paramConvert<int>(const String& value) {
