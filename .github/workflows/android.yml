@@ -1,0 +1,97 @@
+name: Android app
+
+# Reusable: CI builds a debug APK and runs the unit tests; release and prerelease
+# build the signed release APK and hand it over as the "android-apk" artifact.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to build, empty for the triggering commit
+        type: string
+        required: false
+        default: ""
+      version_name:
+        description: App version name (release tag without the leading v)
+        type: string
+        required: false
+        default: dev
+      release:
+        description: Build the signed release APK
+        type: boolean
+        required: false
+        default: false
+    secrets:
+      ANDROID_KEYSTORE_BASE64:
+        required: false
+      ANDROID_KEYSTORE_PASSWORD:
+        required: false
+      ANDROID_KEY_ALIAS:
+        required: false
+      ANDROID_KEY_PASSWORD:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Android app
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0 # versionCode = commit count
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Install Android SDK packages
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0" "build-tools;36.0.0" > /dev/null
+
+      - name: Unit tests
+        run: ./gradlew :app:testDebugUnitTest
+
+      - name: Build debug APK
+        if: ${{ !inputs.release }}
+        run: ./gradlew :app:assembleDebug
+
+      - name: Build signed release APK
+        if: ${{ inputs.release }}
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          VERSION_NAME: ${{ inputs.version_name }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "::error::Signing secrets missing (ANDROID_KEYSTORE_BASE64 etc.)"
+            exit 1
+          fi
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/release.jks"
+          VERSION_CODE=$(git rev-list --count HEAD)
+          ./gradlew :app:assembleRelease -PappVersionName="$VERSION_NAME" -PappVersionCode="$VERSION_CODE"
+          mkdir -p ../dist
+          cp app/build/outputs/apk/release/app-release.apk "../dist/OpenNeato-android-$VERSION_NAME.apk"
+          rm -f "$RUNNER_TEMP/release.jks"
+
+      - name: Upload APK
+        if: ${{ inputs.release }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-apk
+          path: dist/*.apk
+          if-no-files-found: error

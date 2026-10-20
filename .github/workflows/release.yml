@@ -182,10 +182,20 @@ jobs:
             .pio/build/${{ matrix.env }}/*-firmware.bin
             .pio/build/${{ matrix.env }}/*-full.tar.gz
 
+  android:
+    name: Android app
+    needs: prepare
+    uses: ./.github/workflows/android.yml
+    with:
+      ref: ${{ github.event.inputs.release_tag }}
+      version_name: ${{ needs.prepare.outputs.version }}
+      release: true
+    secrets: inherit
+
   release:
     name: Build and Release
     runs-on: macos-latest
-    needs: [prepare, firmware]
+    needs: [prepare, firmware, android]
 
     steps:
       - name: Checkout code
@@ -223,6 +233,17 @@ jobs:
             ${{ github.event.inputs.draft == 'true' && '--draft' || '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download Android APK
+        uses: actions/download-artifact@v8
+        with:
+          name: android-apk
+          path: /tmp/android
+
+      - name: Attach Android APK
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.event.inputs.release_tag }}" /tmp/android/*.apk --clobber
 
       - name: Mark as pre-release
         if: ${{ github.event.inputs.prerelease == 'true' }}

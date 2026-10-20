@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The robot is reached over plain HTTP on the local network (no TLS on the ESP32) -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

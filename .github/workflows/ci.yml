@@ -116,3 +116,7 @@ jobs:
       - name: Build
         run: go build -o openneato-flash .
         working-directory: flash
+
+  android:
+    name: Android app
+    uses: ./.github/workflows/android.yml

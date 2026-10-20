@@ -17,12 +17,15 @@ machines) is in [`docs/neato-serial-protocol.md`](docs/neato-serial-protocol.md)
 
 ## Architecture
 
-Three top-level components: `firmware/` (ESP32 C/C++), `frontend/` (Preact SPA),
-`flash/` (Go CLI). `platformio.ini` at root.
+Four top-level components: `firmware/` (ESP32 C/C++), `frontend/` (Preact SPA),
+`flash/` (Go CLI), `android/` (Kotlin/Compose app). `platformio.ini` at root.
 
 - Firmware: non-blocking `loop()`, managers wired via dependency injection in `main.cpp`
 - Frontend: hash-based routing, polling hooks, dark/light theme, mobile-first, embedded in firmware via PROGMEM
 - Flash tool: Go CLI, cross-compiled via GoReleaser, uses esptool subprocess
+- Android app: AGP 9 (built-in Kotlin, no `kotlin-android` plugin), Material 3 Expressive. The API client is
+  generated from `frontend/api/openapi.yaml` at build time, so a spec change must still compile there. German
+  and English strings only (`values/`, `values-de/`).
 - Mock server: `frontend/mock/server.js` Vite plugin, `SCENARIO` constant for state switching. Reset to `"ok"` before
   committing.
 - Build pipeline: `npm run build` -> lint -> `jscpd` duplicate check -> `openapi-typescript` regenerates `src/types.generated.ts` from
@@ -76,6 +79,9 @@ Verify firmware changes: `pio run -e c3-debug` + `./scripts/check_format.py` +
 Verify frontend changes: `npm run check` + `npm run build` in `frontend/`.
 
 Verify flash tool changes: `golangci-lint run ./...` + `go build` in `flash/`.
+
+Verify Android or API spec changes: `./gradlew :app:testDebugUnitTest :app:assembleRelease` in `android/`
+(JDK 21). Release builds use R8, so test new libraries in a release APK, not only debug.
 
 Verify GitHub Actions workflow changes: install `actionlint` if missing, then run
 `actionlint` from the repository root.
