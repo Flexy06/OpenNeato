@@ -1,0 +1,81 @@
+name: Android release
+
+# Every push that touches the app (or the API spec it is generated from) builds the
+# signed APK and publishes it as a rolling pre-release per branch: tag
+# "android-<branch>" always points at the newest build, the APK is replaced. The
+# version code is the commit count, so a newer APK always installs over an older one.
+on:
+  push:
+    paths:
+      - android/**
+      - frontend/api/openapi.yaml
+      - .github/workflows/android.yml
+      - .github/workflows/android-release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  version:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Version from branch and commit count
+        id: v
+        run: |
+          SAFE_REF="${GITHUB_REF_NAME//[^a-zA-Z0-9._-]/-}"
+          COUNT=$(git rev-list --count HEAD)
+          {
+            echo "tag=android-$SAFE_REF"
+            echo "version=$SAFE_REF.$COUNT-${GITHUB_SHA:0:7}"
+          } >> "$GITHUB_OUTPUT"
+
+  android:
+    name: Android app
+    needs: version
+    uses: ./.github/workflows/android.yml
+    with:
+      version_name: ${{ needs.version.outputs.version }}
+      release: true
+    secrets: inherit
+
+  publish:
+    name: Publish APK
+    needs: [version, android]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download APK
+        uses: actions/download-artifact@v8
+        with:
+          name: android-apk
+          path: dist
+
+      - name: Replace the branch release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.version.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          # The versioned file plus a stable name for a fixed download link:
+          # releases/download/<tag>/OpenNeato-android.apk
+          cp dist/OpenNeato-android-*.apk dist/OpenNeato-android.apk
+          gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
+          gh release create "$TAG" dist/*.apk \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --title "Android app ($GITHUB_REF_NAME)" \
+            --notes "Latest Android app build from branch \`$GITHUB_REF_NAME\`, version $VERSION (commit $GITHUB_SHA). Replaced on every push that changes the app."

@@ -23,6 +23,11 @@ attaches `OpenNeato-android-<version>.apk` to the GitHub release. The keystore l
 the repository secrets (`ANDROID_KEYSTORE_BASE64` and friends). Every release must be
 signed with the same key, otherwise installed apps cannot be updated.
 
+Besides that, `.github/workflows/android-release.yml` builds the signed APK on every
+push that changes the app and replaces the rolling pre-release `android-<branch>`
+with it. The newest build of a branch is always at
+`releases/download/android-<branch>/OpenNeato-android.apk`.
+
 ## Trying it without a robot
 
 Run the web mock (`npm run dev` in `frontend/`) and enter `10.0.2.2:5173` as the address
