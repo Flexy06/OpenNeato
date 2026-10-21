@@ -238,8 +238,18 @@ enum CommandStatus {
 #define GUIDED_SHORTCUT_WINDOW 40 // Max waypoints skipped ahead by one transit shortcut
 #define GUIDED_REACHED_MM 120 // Waypoint counts as reached within this distance
 #define GUIDED_HEADING_TOL_DEG 10.0f // Turn in place first if heading error exceeds this
-#define GUIDED_STEP_MM 700 // Longest drive before standing still and checking the pose against the map
-#define GUIDED_TURN_FIX_DEG 45.0f // Turns larger than this are followed by a scan, too
+#define GUIDED_DRIVE_MAX_MM 3000 // Longest single drive command (lanes are driven end to end, no stops)
+#define GUIDED_ARC_BULGE_MM 50 // Heading corrections on the move: arcs bulge at most this far from the line
+#define GUIDED_CHAIN_MM 220 // The next drive is sent this far before the current one ends ...
+#define GUIDED_CHAIN_DEG 20.0f // ... when it turns no more than this (sharper: stop and turn in place)
+#define GUIDED_REDIRECT_DEG 2.5f // A fix on the move re-steers the drive when the heading is off by more
+#define GUIDED_FIX_EVERY_MM 450 // Map fix on the move after this much travel ...
+#define GUIDED_FIX_AFTER_TURN_MM 80 // ... and early on a new line after a turn (heading check)
+#define GUIDED_FIX_TURN_DEG 30.0f // A turn larger than this asks for that early fix
+#define GUIDED_STALE_FIX_MM 1500 // No good fix for this long: the next stop scans standing still
+#define GUIDED_SCAN_AGE_MS 100 // GetLDSScan returns the last full turret turn: centred ~0.1 s before the request
+#define GUIDED_SCAN_MIN_RADIUS_MM 800 // No scans on the move along tighter arcs (rotation smears the scan)
+#define GUIDED_ACCEL 100 // mm/s² ramps for drives and turns (default = speed): no wheel slip on stops
 #define GUIDED_MIN_POINT_SPACING_MM 100 // Drop recorded points closer than this to the previous one
 #define GUIDED_SPEED_CLEAN 150 // mm/s while cleaning inside a selected room
 #define GUIDED_SPEED_TRANSIT 200 // mm/s while driving between rooms / returning
@@ -278,7 +288,7 @@ enum CommandStatus {
 #define GUIDED_PF_SEED_DEG 6.0f
 #define GUIDED_START_SPREAD_MM 80.0f // Converged at the start: position spread below this ...
 #define GUIDED_START_SPREAD_DEG 5.0f // ... and heading spread below this
-#define GUIDED_LOST_QUALITY 0.6f // Fix quality (mean field value under the scan) below this = bad fix
+#define GUIDED_LOST_QUALITY 0.6f // Fix quality (mean field value under the best 75% of the beams) below this = bad fix
 #define GUIDED_LOST_SPREAD_MM 180.0f // Spread above this = bad fix; two in a row → re-localize
 #define GUIDED_RELOC_TRIES 2 // Turn-around re-localizations before giving up
 #define GUIDED_RELOC_RADIUS_MM 600 // Re-seed search window around the estimate (doubled on the next try)

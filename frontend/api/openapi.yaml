@@ -1651,6 +1651,9 @@ components:
         message:
           type: string
           description: Failure reason, or why the robot returned early (empty on success)
+        unreached:
+          type: string
+          description: Selected room ids the run never got into (closed door, blocked doorway), comma-separated; set once the run is returning
         compass:
           type: string
           enum:

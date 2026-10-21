@@ -38,18 +38,31 @@ static inline int cellOf(float v, int origin, float cell) {
     return static_cast<int>(floorf((v - static_cast<float>(origin)) / cell));
 }
 
-float poseQuality(const LocField& field, const ScanBeams& b, float x, float y, float t) {
+float poseQuality(const LocField& field, const ScanBeams& b, float x, float y, float t, float keep) {
     if (b.n == 0)
         return 0.0f;
     float c = cosf(t);
     float s = sinf(t);
     auto cell = static_cast<float>(field.cell);
-    int sum = 0;
+    // Histogram of the field values under the beams: the mean over the best `keep`
+    // share ignores returns from things the map does not have (chairs, boxes, people)
+    uint16_t hist[32] = {};
     for (int i = 0; i < b.n; i++) {
-        sum += field.cellv(cellOf(x + c * b.x[i] - s * b.y[i], field.originX, cell),
-                           cellOf(y + s * b.x[i] + c * b.y[i], field.originY, cell));
+        uint8_t v = field.cellv(cellOf(x + c * b.x[i] - s * b.y[i], field.originX, cell),
+                                cellOf(y + s * b.x[i] + c * b.y[i], field.originY, cell));
+        hist[v >> 3]++;
     }
-    return static_cast<float>(sum) / (static_cast<float>(b.n) * 255.0f);
+    auto want = static_cast<int>(lroundf(static_cast<float>(b.n) * keep));
+    if (want < 1)
+        want = 1;
+    int taken = 0;
+    float sum = 0.0f;
+    for (int k = 31; k >= 0 && taken < want; k--) {
+        int n = hist[k] < want - taken ? hist[k] : want - taken;
+        sum += static_cast<float>(n) * (static_cast<float>(k) * 8.0f + 3.5f);
+        taken += n;
+    }
+    return sum / (static_cast<float>(taken) * 255.0f);
 }
 
 // Bilinear field sample (sub-cell precision for the refinement)
@@ -196,10 +209,14 @@ void ParticleFilter::update(const LocField& field, const ScanBeams& b, const Flo
     if (p.empty() || b.n < 20)
         return;
     if (!lutReady) {
-        // A beam far from any mapped wall is not impossible (furniture moved,
-        // people, open doors): floor of 0.08 keeps one outlier from killing a particle
-        for (int v = 0; v < 256; v++)
-            logLut[v] = logf(0.08f + 0.92f * static_cast<float>(v) / 255.0f);
+        // Beam model on the distance to the nearest mapped return (field = 255 at a
+        // return, 0 at LOC_FIELD_FALLOFF_MM): Gaussian hit, so a return 15-25 cm off a
+        // wall (a box in front of it, a chair) barely pulls; the floor treats it as an
+        // outlier instead of killing the particle (furniture moved, people, open doors)
+        for (int v = 0; v < 256; v++) {
+            float d = LOC_FIELD_FALLOFF_MM * (1.0f - static_cast<float>(v) / 255.0f);
+            logLut[v] = logf(0.1f + 0.9f * expf(-d * d / (2.0f * LOC_BEAM_SIGMA_MM * LOC_BEAM_SIGMA_MM)));
+        }
         lutReady = true;
     }
     // Use at most ~60 beams: plenty for the weighting, keeps it to a few ms

@@ -16,18 +16,22 @@ The fake `NeatoSerial` simulates:
 
 - a differential-drive robot with systematic and per-move random wheel slip,
   a carpet (extra slip, heading kicks at its edge),
+- ramps: the wheels accelerate/brake at the commanded `Accel`, a new SetMotor
+  replaces the running one at the current speed (continuous driving),
 - serial latency (60 ms, LIDAR scans 700 ms), failed answers (2%) and,
-  per scenario, lost answers and a serial outage (watchdog tests),
+  per scenario, lost answers and a serial outage (watchdog tests); answers
+  describe the robot when the command went out (`lastSentAt()`),
 - walls, mapped furniture (cabinet, table legs), unmapped chairs, a cliff region,
 - the dock (contacts only when the robot sits within ~2 cm / 6° of the docked pose),
-- a ray-cast LIDAR with noise and spurious short returns (CCW or CW, optional mounting offset),
+- a ray-cast LIDAR with noise and spurious short returns (CCW or CW, optional mounting offset);
+  a scan is the turret turn of the 0.2 s before the request, so scans on the move smear like real ones,
 - battery drain.
 
 Before each scenario a likelihood field is rasterized from the world (walls
 smeared sideways like a real mapping run) and uploaded.
 
 ```bash
-./run.sh x basic|robust|flat     # one scenario group
+./run.sh x basic|robust|flat|home   # one scenario group
 SIM_SEED=7 ./run.sh              # other random seed
 SIM_TRAJ_DIR=/tmp/t GUIDED_SIM_TRACE_DIR=/tmp/t ./run.sh   # true path CSV + run traces
 SIM_DEBUG=1 ./run.sh             # print every contact with walls/furniture
@@ -43,6 +47,14 @@ Groups:
 - **flat** (hallway with the dock next to a cabinet, 80 cm door, living room with
   table legs, sofa, carpet, chairs): both rooms, then 10 runs in a row on the same
   map without recalibration.
+- **home** (hallway with the dock, living room, kitchen, bedroom and bath behind
+  70-80 cm doors, a second way between living room and kitchen, furniture, things
+  that were not there when mapping: chairs, boxes against walls, a laundry basket,
+  shoes, bags): all rooms, single rooms through narrow doors, a shut bath door
+  (reported as not reached), a lot of clutter with the dining table moved, heavy drift.
+
+Each run prints `stops` (standstills from cruising) and stops per metre: guided
+cleaning drives lanes in one go and should only stop at sharp corners and obstacles.
 
 Passing it means the control logic is consistent and robust against these
 effects; it does not replace testing on a robot.

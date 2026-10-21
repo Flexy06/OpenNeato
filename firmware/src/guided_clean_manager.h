@@ -28,11 +28,14 @@ class SystemManager;
 //                 drive 30 cm off the dock and turn once around in four stops,
 //                 scanning at each. A particle filter must converge before any
 //                 cleaning starts; the dock pose in the map is learned from this.
-//   3. Drive    — stop-and-go: turn in place, drive straight ≤ GUIDED_STEP_MM,
-//                 stand still, scan, update the particle filter. Every step is
-//                 checked against the map; the filter's spread says when the
-//                 robot is unsure — then it stops and re-localizes by turning
-//                 on the spot instead of driving on blind.
+//   3. Drive    — continuous: lanes and transit lines are driven in one go, the
+//                 next command is sent before the current one ends, and only
+//                 sharp corners, obstacles and bumps stop the robot (gentle
+//                 ramps). LIDAR scans are taken on the move and paired with the
+//                 odometry of the moment they were taken; each one updates the
+//                 particle filter and re-steers the drive with a gentle arc. The
+//                 filter's spread says when the robot is unsure — then it stops
+//                 and re-localizes by turning on the spot instead of driving on.
 //   4. Dock     — drive to a staging point in front of the dock, then align by
 //                 matching scans against the dock reference scan (ICP, cm-level:
 //                 same place, same view) and back straight onto the contacts.
@@ -168,6 +171,14 @@ private:
     size_t targetIdx = 0; // Waypoint currently driven to
     int cleanTotal = 0;
     int cleanDone = 0;
+    // Per room: lane points planned / reached (a room never entered is reported)
+    struct RoomProgress {
+        uint8_t id;
+        uint16_t total;
+        uint16_t reached;
+    };
+    std::vector<RoomProgress> roomProg;
+    String unreachedRooms() const;
     int obstacleStreak = 0;
     int obstacleTotal = 0;
 
@@ -183,10 +194,14 @@ private:
     float poseX = 0.0f;
     float poseY = 0.0f;
     float poseTheta = 0.0f;
-    // Pose right after the last filter update (odometry delta since = motion model input)
+    // Filter estimate at the last update's scan, and the odometry at that moment
+    // (odometry since = motion model input; scans on the move are older than "now")
     float fixX = 0.0f;
     float fixY = 0.0f;
     float fixT = 0.0f;
+    float fixOdoX = 0.0f;
+    float fixOdoY = 0.0f;
+    float fixOdoT = 0.0f;
     // Pure odometry since leaving the dock, in the dock frame (learns the dock pose)
     float odoX = 0.0f;
     float odoY = 0.0f;
@@ -195,6 +210,26 @@ private:
     int encL = 0;
     int encR = 0;
     void integrateEncoders(int newL, int newR);
+    // Map pose (x, y, t) held at the odometry pose (ox, oy, ot): pose now follows
+    void setFix(float x, float y, float t, float ox, float oy, float ot);
+    void resetPose(float x, float y, float t) { setFix(x, y, t, odoX, odoY, odoT); }
+    // Odometry over time (time = when the encoder query went out) to place scans
+    struct OdoSample {
+        unsigned long t = 0;
+        float x = 0.0f;
+        float y = 0.0f;
+        float th = 0.0f;
+    };
+    static const int ODO_HIST = 24;
+    OdoSample odoHist[ODO_HIST];
+    int odoHistN = 0;
+    int odoHistPos = 0;
+    void pushOdo(unsigned long t);
+    void odoAt(unsigned long t, float& x, float& y, float& th) const;
+    unsigned long odoNewest() const;
+    float distSinceFix = 0.0f; // Odometry since the last fix attempt (mm / rad)
+    float turnSinceFix = 0.0f;
+    float distSinceGood = 0.0f; // ... since the last good fix
 
     // -- Waits + watchdog -----------------------------------------------------------
     Wait wait = Wait::None;
@@ -226,10 +261,17 @@ private:
     int moveStillPolls = 0;
     int moveStallPolls = 0;
     bool moveEnding = false;
+    bool navMove = false; // Navigation drive: may be chained, re-steered or softly stopped
+    int moveSpeed = 0;
     std::function<void(MoveResult)> onMoveDone;
     const char *blockReason = "";
     void startMove(MoveKind kind, int leftMM, int rightMM, int speed, std::function<void(MoveResult)> done);
+    void sendMove(int leftMM, int rightMM, int speed, bool retry);
     void turnBy(float rad, std::function<void(MoveResult)> done);
+    // Replace the running drive command without stopping (the robot keeps rolling)
+    void redirect(int leftMM, int rightMM);
+    // Ramp down to a stop within the braking distance instead of cutting the wheels
+    void softStop();
     void endMove(MoveResult r);
     // Bump/stall/cliff: stop, back off, then report Blocked/Cliff to the move's owner
     void onContact(const char *reason, bool cliff);
@@ -273,7 +315,7 @@ private:
     };
     DynGrid dyn;
     void initDyn();
-    void markScan();
+    void markScan(float px, float py, float pt);
     void dynSet(int cx, int cy, bool occupied);
     void rememberObstacle(float aheadMM, int radius, bool behind);
     bool nearNogo(float x, float y) const;
@@ -294,6 +336,18 @@ private:
     int lostCount = 0;
     int relocTries = 0;
     bool needFix = false;
+    bool needSpin = false; // Lost on the move: stop softly, then re-localize turning on the spot
+    bool reselect = false; // Braked for something seen on the line: choose the next target again
+    // Scan on the move: requested, its answer (in scanBuf) and when it was taken
+    bool mscanPending = false;
+    bool mscanReady = false;
+    unsigned long mscanAt = 0;
+    uint32_t mscanGen = 0;
+    bool wantMoveScan() const;
+    void startMoveScan();
+    void onMoveScan();
+    // After a fix: what the scan says about the run (lost count, obstacles, re-plans)
+    void afterFix(bool good, float scanX, float scanY, float scanT, float jumpMM, bool moving);
     // Deferred scan processing (see fetchScan): keeps big buffers off the loop stack
     LdsScanData scanBuf;
     bool scanJobOk = false;
@@ -301,8 +355,14 @@ private:
     bool inTestMode = false; // TestMode On was sent by this run (finishing must leave it)
     std::function<void(bool, const LdsScanData&)> scanJob;
     void scanThen(const char *what, std::function<void(bool, const LdsScanData&)> handler);
-    // Filter update from a stationary scan; returns false when the scan was unusable
-    bool applyFix(const LdsScanData& scan, const char *tag);
+    // Filter update from a scan taken at odometry pose (ox, oy, ot) — standing still:
+    // the current one. Returns true for a good fix; the map pose at the scan is
+    // left in fixX/fixY/fixT.
+    bool applyFix(const LdsScanData& scan, const char *tag) { return applyFixAt(scan, tag, odoX, odoY, odoT); }
+    bool applyFixAt(const LdsScanData& scan, const char *tag, float ox, float oy, float ot);
+    // Exhaustive match around the pose at the scan when the filter's fix is bad:
+    // the cloud may have locked onto a wrong pose (more slip than the motion model)
+    bool sensorReset();
     void reseedAround(float x, float y, float t, int radiusMM, int angleDeg, float sigmaXY);
     void trackingFix();
 
@@ -331,6 +391,16 @@ private:
     void selectNextTarget();
     // Turn towards / drive straight to (tx, ty)
     void moveTowards(float tx, float ty, int speed);
+    // Wheel distances for a drive from the pose to (tx, ty): straight, or a gentle
+    // arc that removes the heading error. False when the error exceeds maxErrDeg
+    // (a turn in place comes first).
+    bool driveCommand(float tx, float ty, int& l, int& r, float maxErrDeg) const;
+    // After a fix on the move: re-steer the running drive (or brake for a turn)
+    void steer();
+    // Near the end of a drive: send the next one now if it bends only slightly
+    void chainNext();
+    // Waypoints passed on a long drive count as reached
+    void passWaypoints();
     void onNavMoveDone(MoveKind kind, float turned, MoveResult r);
     void markReached(size_t idx);
     void buildGrid();
@@ -352,10 +422,14 @@ private:
     bool planPath(float gx, float gy, std::vector<Waypoint>& out) const;
     bool planPathOnce(float gx, float gy, std::vector<Waypoint>& out) const;
     mutable bool planIgnoreObstacles = false;
+    mutable float planClearance = GUIDED_PLAN_CLEARANCE_MM; // Room around transit cells (lowered as a last try)
     void setLeg(std::vector<Waypoint>& pts, bool transit);
     void startNextLeg();
     void loadRunLeg();
     void skipCurrentRun(const char *why);
+    bool backtrackOut();
+    bool backtracking = false; // The current leg retraces the trail out of a pocket
+    int backtracks = 0; // ... in a row without a successful plan
     void onLegComplete();
     void onTransitBlocked();
     void onBlocked();

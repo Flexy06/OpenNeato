@@ -455,6 +455,7 @@
   "Select none": "Keine auswählen",
   "Select all": "Alle auswählen",
   "{count} obstacles": "{count} Hindernisse",
+  "Not reached: {rooms}": "Nicht erreicht: {rooms}",
   "Return to dock": "Zur Ladestation",
   "Clean {count} selected rooms": "{count} ausgewählte Räume reinigen",
   "Select rooms to clean": "Räume zum Reinigen auswählen",

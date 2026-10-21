@@ -897,7 +897,8 @@ bool NeatoSerial::setLdsRotation(bool on, std::function<void(bool)> callback) {
     return enqueue(cmd, wrapAction(callback), PRIORITY_HIGH);
 }
 
-bool NeatoSerial::setMotorWheels(int leftMM, int rightMM, int speedMMs, std::function<void(bool)> callback) {
+bool NeatoSerial::setMotorWheels(int leftMM, int rightMM, int speedMMs, std::function<void(bool)> callback,
+                                 int accelMMs2) {
     // SetMotor 0 0 0 bug: zero values are ignored, robot coasts for ~1s.
     // Workaround: disable wheels for immediate stop, then re-enable for next command.
     if (leftMM == 0 && rightMM == 0) {
@@ -916,6 +917,8 @@ bool NeatoSerial::setMotorWheels(int leftMM, int rightMM, int speedMMs, std::fun
     speedMMs = constrain(speedMMs, 0, 300);
     String cmd = String(CMD_SET_MOTOR) + " LWheelDist " + String(leftMM) + " RWheelDist " + String(rightMM) +
                  " Speed " + String(speedMMs);
+    if (accelMMs2 > 0)
+        cmd += " Accel " + String(constrain(accelMMs2, 1, 300));
     return enqueue(cmd, wrapAction(callback), PRIORITY_CRITICAL);
 }
 

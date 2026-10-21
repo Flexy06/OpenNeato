@@ -40,9 +40,46 @@ struct Rect { double x0, y0, x1, y1; };
 // 1: flat like the real one: narrow hallway ("Flur") with the dock at one end and a
 //    cabinet right next to it, 80 cm door into a living room with table legs, a sofa,
 //    a carpet (slip + heading kicks) and chairs that were not there when mapping
+// 2: whole home: hallway with the dock, living room, kitchen, bedroom and bath behind
+//    70-80 cm doors, furniture, a second way between living room and kitchen
 static int g_world = 0;
+// World 2 after the mapping run: 0 = tidy, 1 = everyday clutter, 2 = a lot (boxes along
+// the walls, the dining table moved, a bag in the doorway)
+static int g_clutter = 1;
+static bool g_bathClosed = false; // Bath door shut after mapping
+
+static void rectWalls(NeatoSerial& s, double x0, double y0, double x1, double y1) {
+    s.walls.push_back({x0, y0, x1, y0});
+    s.walls.push_back({x1, y0, x1, y1});
+    s.walls.push_back({x1, y1, x0, y1});
+    s.walls.push_back({x0, y1, x0, y0});
+}
 
 static void buildWorld(NeatoSerial& s) {
+    if (g_world == 2) {
+        s.walls = {// Outline
+                   {-170, -4000, -170, 2600}, {-170, 2600, 1000, 2600}, {1000, 2600, 1000, 4600},
+                   {1000, 4600, 6000, 4600},  {6000, 4600, 6000, -2600}, {6000, -2600, 4000, -2600},
+                   {4000, -2600, 4000, -4000}, {4000, -4000, -170, -4000},
+                   // Hallway, top: bath door 200..900, living room door 1500..2300; then the
+                   // living room / kitchen wall with an opening 5000..5800
+                   {-170, 600, 200, 600}, {900, 600, 1500, 600}, {2300, 600, 5000, 600}, {5800, 600, 6000, 600},
+                   {1000, 600, 1000, 2600}, // Bath / living room
+                   // Hallway, bottom: bedroom door 2600..3350
+                   {-170, -600, 2600, -600}, {3350, -600, 4000, -600},
+                   // Kitchen west wall, door from the hallway -400..400
+                   {4000, -2600, 4000, -400}, {4000, 400, 4000, 600}};
+        rectWalls(s, 1500, 4000, 3500, 4600); // Sofa
+        rectWalls(s, 5600, 1500, 6000, 3500); // TV board
+        rectWalls(s, 1000, -4000, 2600, -2000); // Bed
+        rectWalls(s, -170, -4000, 500, -3400); // Wardrobe
+        rectWalls(s, 5400, -2600, 6000, -200); // Kitchen counter
+        rectWalls(s, -170, 1900, 700, 2600); // Bath tub
+        rectWalls(s, 2400, 330, 3200, 600); // Shoe cabinet in the hallway
+        s.boxes = {{3000, 1950, 25}, {4200, 1950, 25}, {3000, 2750, 25}, {4200, 2750, 25}, // Dining table
+                   {4600, -1800, 25}, {5100, -1800, 25}, {4600, -1100, 25}, {5100, -1100, 25}}; // Kitchen table
+        return;
+    }
     if (g_world == 0) {
         s.walls = {{-170, -2000, -170, 2000}, {6000, -2000, 6000, 2000}, {-170, -2000, 6000, -2000},
                    {-170, 2000, 6000, 2000},  {3000, -2000, 3000, -500}, {3000, 500, 3000, 2000}};
@@ -67,6 +104,39 @@ static void addUnmapped(NeatoSerial& s) {
         s.boxes.push_back({3400, 1450, 150}); // Chair pulled out from the table
         s.boxes.push_back({2600, 2200, 150});
     }
+    if (g_world == 2) {
+        if (g_bathClosed)
+            s.walls.push_back({200, 600, 900, 600});
+        if (g_clutter >= 1) {
+            s.boxes.push_back({2800, 2350, 150}); // Chairs pulled out
+            s.boxes.push_back({4400, 2350, 150});
+            s.boxes.push_back({1350, 1500, 180}); // Box against the wall
+            s.boxes.push_back({3000, -3200, 200}); // Laundry basket
+            s.boxes.push_back({2450, -470, 90}); // Shoes at the bedroom door
+            s.boxes.push_back({4300, -2300, 150}); // Bag in the kitchen
+            s.boxes.push_back({1200, -430, 150}); // Box in the hallway
+        }
+        if (g_clutter >= 2) {
+            // Boxes along the walls (they hide the walls from the LIDAR)
+            for (double x = 1600; x <= 5200; x += 900)
+                s.boxes.push_back({x, 4600 - 180 - (x < 3600 ? 600 : 0), 170});
+            for (double y = -2200; y <= -1000; y += 600)
+                s.boxes.push_back({3800, y, 160});
+            s.boxes.push_back({5800, 1000, 170});
+            s.boxes.push_back({200, -1500, 200});
+            // Dining table moved 40 cm (the mapped legs are gone, new ones elsewhere)
+            for (auto& b: s.boxes)
+                if (b.r == 25 && b.y > 1000)
+                    b.r = 0;
+            for (double x: {3400.0, 4600.0})
+                for (double y: {1950.0, 2750.0})
+                    s.boxes.push_back({x, y, 25});
+            s.boxes.push_back({5400, 300, 130}); // Bag right behind the living room / kitchen opening
+        }
+        // Mapped legs removed above: drop them for real
+        s.boxes.erase(std::remove_if(s.boxes.begin(), s.boxes.end(), [](const SimCircle& b) { return b.r <= 0; }),
+                      s.boxes.end());
+    }
 }
 
 static std::vector<Pt> recordedPath() {
@@ -76,6 +146,50 @@ static std::vector<Pt> recordedPath() {
         for (double x = x0; (step > 0 ? x <= x1 : x >= x1); x += step) p.push_back({x, y});
         p.push_back({x1, y});
     };
+    if (g_world == 2) {
+        // A whole-home mapping run: hallway, then each room
+        p.push_back({300, 0});
+        lane(300, 3700, 0);
+        p.push_back({550, 0});
+        p.push_back({550, 900});
+        lane(100, 800, 900);
+        lane(800, 100, 1300);
+        lane(100, 800, 1700);
+        p.push_back({550, 900});
+        p.push_back({550, 0});
+        p.push_back({1900, 0});
+        p.push_back({1900, 900});
+        bool dir = true;
+        // Around the table legs (y 1950 / 2750), like the robot's own run would
+        for (double y: {900.0, 1300.0, 1650.0, 2350.0, 3100.0, 3600.0}) {
+            dir ? lane(1300, 5300, y) : lane(5300, 1300, y);
+            dir = !dir;
+        }
+        p.push_back({1900, 900});
+        p.push_back({1900, 0});
+        p.push_back({3700, 0});
+        p.push_back({4300, 0});
+        dir = true;
+        for (double y: {200.0, -250.0, -700.0, -1450.0, -2150.0}) {
+            dir ? lane(4300, 5200, y) : lane(5200, 4300, y);
+            dir = !dir;
+        }
+        p.push_back({4300, 0});
+        p.push_back({2975, 0});
+        p.push_back({2975, -900});
+        lane(3700, 300, -900);
+        lane(300, 3700, -1300);
+        lane(3700, 300, -1700);
+        lane(300, 2900, -1700); // Back along the bed to the free strip beside it
+        dir = true;
+        for (double x = 2900; x <= 3700; x += 400, dir = !dir) {
+            for (double y = -2100; y >= -3700; y -= 500) p.push_back({x, dir ? y : -5800 - y});
+        }
+        p.push_back({2975, -900});
+        p.push_back({2975, 0});
+        p.push_back({300, 0});
+        return p;
+    }
     if (g_world == 0) {
         p.push_back({300, 0});
         bool dir = true;
@@ -102,7 +216,11 @@ static std::vector<Pt> recordedPath() {
     return p;
 }
 
-static Rect nogoRect() { return g_world == 0 ? Rect{4200, 600, 4900, 1400} : Rect{3950, 3000, 4500, 3500}; }
+static Rect nogoRect() {
+    if (g_world == 2)
+        return Rect{5300, 3800, 6000, 4600}; // Plants in the living room corner
+    return g_world == 0 ? Rect{4200, 600, 4900, 1400} : Rect{3950, 3000, 4500, 3500};
+}
 
 // Map frame = world + offset: the recording's origin is not exactly the dock
 static int g_mapOffX = 0;
@@ -129,7 +247,13 @@ static std::string buildMapDoc(const std::vector<Pt>& path) {
             d += " " + mapPt(static_cast<int>(path[j].x), static_cast<int>(path[j].y));
         d += "\n";
     }
-    if (g_world == 0) {
+    if (g_world == 2) {
+        d += rectZone('R', 1, "Flur", {-170, -600, 4000, 600});
+        d += rectZone('R', 2, "Wohnzimmer", {1000, 600, 6000, 4600});
+        d += rectZone('R', 3, "K%C3%BCche", {4000, -2600, 6000, 600});
+        d += rectZone('R', 4, "Schlafzimmer", {-170, -4000, 4000, -600});
+        d += rectZone('R', 5, "Bad", {-170, 600, 1000, 2600});
+    } else if (g_world == 0) {
         d += rectZone('R', 1, "Wohnzimmer", {-170, -2000, 3000, 2000});
         d += rectZone('R', 2, "K%C3%BCche", {3000, -2000, 6000, 2000});
     } else {
@@ -142,7 +266,7 @@ static std::string buildMapDoc(const std::vector<Pt>& path) {
 }
 
 struct Result {
-    std::string phase, message;
+    std::string phase, message, unreached;
     bool docked;
     bool testMode; // Robot left in TestMode at the end (must never happen)
     double minNogoDist; // min distance robot centre ↔ no-go rectangle (negative = inside)
@@ -276,7 +400,7 @@ static Result runScenario(const char *name, const char *rooms, std::function<voi
     String err = guided.command("start", rooms);
     if (!err.isEmpty()) {
         std::printf("start refused: %s\n", err.c_str());
-        return {"refused", err.str(), serial.docked(), serial.inTestMode, 0, 0, 0, 0, 0, 0};
+        return {"refused", err.str(), "", serial.docked(), serial.inTestMode, 0, 0, 0, 0, 0, 0};
     }
 
     std::set<long> brushCells;
@@ -358,8 +482,11 @@ static Result runScenario(const char *name, const char *rooms, std::function<voi
             std::ofstream(out + ".jsonl", std::ios::binary) << in.rdbuf();
         }
     }
-    std::printf("  true pose %.0f,%.0f θ=%.1f° docked=%d testMode=%d collisions(ticks)=%d scans=%d\n", serial.tx,
-                serial.ty, serial.tth * 180 / M_PI, serial.docked(), serial.inTestMode, serial.collisions, serial.scans);
+    std::printf("  true pose %.0f,%.0f θ=%.1f° docked=%d testMode=%d collisions(ticks)=%d scans=%d stops=%d "
+                "driven=%.1fm (%.2f stops/m)\n",
+                serial.tx, serial.ty, serial.tth * 180 / M_PI, serial.docked(), serial.inTestMode, serial.collisions,
+                serial.scans, serial.stops, serial.odoKm * 1000,
+                serial.odoKm > 0 ? serial.stops / (serial.odoKm * 1000) : 0.0);
     Result r;
     auto fieldOf = [&](const char *k) {
         std::string s = st.str(), key = std::string("\"") + k + "\":\"";
@@ -370,6 +497,7 @@ static Result runScenario(const char *name, const char *rooms, std::function<voi
     };
     r.phase = fieldOf("phase");
     r.message = fieldOf("message");
+    r.unreached = fieldOf("unreached");
     r.docked = serial.docked();
     r.testMode = serial.inTestMode;
     r.minNogoDist = minNogo;
@@ -549,6 +677,46 @@ int main(int argc, char **argv) {
         g_keepMap = false;
         std::printf("\n  repeat runs docked: %d/10\n", ok);
         expect(ok == 10, "10 runs in a row all complete and dock");
+    }
+
+    if (want("home")) {
+        g_world = 2;
+        Rect living{1300, 900, 5500, 3700};
+        Rect bedroom{2800, -3700, 3700, -900};
+        Rect kitchen{4300, -2300, 5100, 300};
+        Result all = runScenario("home: all rooms, everyday clutter", "", [](NeatoSerial&) {}, living);
+        clean(all, "all rooms: completes and docks");
+        expect(all.cover > 0.6, "all rooms: living room coverage > 60%");
+        expect(all.minNogoDist > 0, "all rooms: avoids the no-go zone");
+
+        Result bed = runScenario("home: bedroom (75 cm door)", "4", [](NeatoSerial&) {}, bedroom);
+        clean(bed, "bedroom: completes and docks");
+        expect(bed.cover > 0.6, "bedroom coverage > 60%");
+
+        Result kit = runScenario("home: kitchen", "3", [](NeatoSerial&) {}, kitchen);
+        clean(kit, "kitchen: completes and docks");
+        expect(kit.cover > 0.6, "kitchen coverage > 60%");
+
+        g_bathClosed = true;
+        Result bath = runScenario("home: bath door shut", "5", [](NeatoSerial&) {}, kitchen);
+        g_bathClosed = false;
+        expect(bath.phase == "done" && bath.docked && !bath.testMode, "bath door shut: gives up on the bath and docks");
+        expect(bath.unreached == "5", "bath door shut: reports the bath as not reached");
+        expect(all.unreached.empty() && kit.unreached.empty(), "rooms behind open doors count as reached");
+
+        g_clutter = 2;
+        Result mess = runScenario("home: a lot of clutter, table moved", "2,3", [](NeatoSerial&) {}, living);
+        g_clutter = 1;
+        clean(mess, "clutter: completes and docks");
+        expect(mess.cover > 0.5, "clutter: living room coverage > 50%");
+        expect(mess.maxErr < 300, "clutter: pose error stays < 30 cm");
+
+        Result drift = runScenario("home: all rooms, heavy drift", "", [](NeatoSerial& s) {
+            s.slipR = 1.025;
+            s.wheelBase = 258;
+            s.moveNoise = 0.025;
+        }, living);
+        clean(drift, "heavy drift: completes and docks");
     }
 
     expect(g_traceFailures == 0, "every started run leaves a complete trace");

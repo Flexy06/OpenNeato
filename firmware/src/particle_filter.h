@@ -18,8 +18,10 @@
 // sure it is, so the controller can stop and re-localize instead of driving
 // on blind.
 //
-// Units: mm and radians, map frame. Scans are only fed while the robot stands
-// still (the 115200 baud link needs ~0.7 s per scan; scans on the move smear).
+// Units: mm and radians, map frame. Scans are fed while standing still and on the
+// move (straight or gentle arcs only: the turret needs 0.2 s per turn, so a scan
+// while turning smears; the controller pairs each scan with the odometry at the
+// time it was taken, not when its ~0.7 s transfer ended).
 
 // Scan points in the robot frame (LIDAR mounting from the field calibration)
 struct ScanBeams {
@@ -33,8 +35,14 @@ struct ScanBeams {
 int extractBeams(const LdsScanData& scan, const LocField& field, int stride, ScanBeams& out);
 // Valid returns in a raw scan (spin-up check)
 int validScanPoints(const LdsScanData& scan);
-// Mean field value (0..1) under the beams at a pose: how well a pose explains the scan
-float poseQuality(const LocField& field, const ScanBeams& b, float x, float y, float t);
+// Mean field value (0..1) under the best `keep` share of the beams at a pose: how
+// well a pose explains the scan, ignoring the worst returns (clutter the map lacks)
+float poseQuality(const LocField& field, const ScanBeams& b, float x, float y, float t, float keep = 0.75f);
+
+// Field value 0 = this far from the nearest mapped return (frontend loc-map.ts FALLOFF_MM)
+static const float LOC_FIELD_FALLOFF_MM = 300.0f;
+// Beam model width: returns this far off a mapped wall still count as hits
+static const float LOC_BEAM_SIGMA_MM = 90.0f;
 
 // Where the robot can be at all (known floor): poses elsewhere are never taken,
 // however well the scan fits (the map's walls also "fit" from outside the house)

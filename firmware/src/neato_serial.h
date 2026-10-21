@@ -79,7 +79,9 @@ public:
     bool testMode(bool enable, std::function<void(bool)> callback = nullptr);
     bool playSound(SoundId soundId, std::function<void(bool)> callback = nullptr);
     bool setLdsRotation(bool on, std::function<void(bool)> callback = nullptr);
-    bool setMotorWheels(int leftMM, int rightMM, int speedMMs, std::function<void(bool)> callback = nullptr);
+    // accelMMs2 > 0 adds "Accel": gentler ramps than the default (accel = speed)
+    bool setMotorWheels(int leftMM, int rightMM, int speedMMs, std::function<void(bool)> callback = nullptr,
+                        int accelMMs2 = 0);
     bool setMotorBrush(int rpm, std::function<void(bool)> callback = nullptr);
     bool setMotorVacuum(bool on, int speedPercent = 80, std::function<void(bool)> callback = nullptr);
     bool setMotorSideBrush(bool on, int powerMw = 5000, std::function<void(bool)> callback = nullptr);
@@ -144,6 +146,9 @@ public:
 
     bool isBusy() const { return state != QUEUE_IDLE || !queue.empty(); }
     int queueDepth() const { return static_cast<int>(queue.size()); }
+    // When the current (inside a callback: the just answered) command went out on the
+    // wire. Sensor answers describe the robot at about this time, not at callback time.
+    unsigned long lastSentAt() const { return commandSentAt; }
 
 private:
     void tick() override; // Called every loop() iteration (intervalMs = 0 — UART state machine)

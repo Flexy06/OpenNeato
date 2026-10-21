@@ -455,6 +455,7 @@
   "Select none": "Hiçbirini seçme",
   "Select all": "Tümünü seç",
   "{count} obstacles": "{count} engel",
+  "Not reached: {rooms}": "Ulaşılamadı: {rooms}",
   "Return to dock": "İstasyona dön",
   "Clean {count} selected rooms": "Seçili {count} odayı temizle",
   "Select rooms to clean": "Temizlenecek odaları seç",

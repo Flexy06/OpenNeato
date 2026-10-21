@@ -187,6 +187,11 @@ export function CleanPanel({
     const active = status?.active ?? false;
     const showStatus = status && status.phase !== "idle";
     const allSelected = map.rooms.length > 0 && map.rooms.every((r) => selection.has(r.id));
+    // Rooms the run never got into (closed door, blocked doorway), by name
+    const unreached = (status?.unreached ?? "")
+        .split(",")
+        .filter((id) => id !== "")
+        .map((id) => map.rooms.find((r) => r.id === Number(id))?.name ?? `#${id}`);
 
     return (
         <div class="floormap-panel">
@@ -255,6 +260,11 @@ export function CleanPanel({
                         </div>
                     )}
                     {status.message && <div class="floormap-status-msg">{t(status.message)}</div>}
+                    {unreached.length > 0 && (
+                        <div class="floormap-status-msg">
+                            {t("Not reached: {rooms}", { rooms: unreached.join(", ") })}
+                        </div>
+                    )}
                 </div>
             )}
 

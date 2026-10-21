@@ -455,6 +455,7 @@
   "Select none": "Deseleziona tutto",
   "Select all": "Seleziona tutto",
   "{count} obstacles": "{count} ostacoli",
+  "Not reached: {rooms}": "Non raggiunto: {rooms}",
   "Return to dock": "Torna alla base",
   "Clean {count} selected rooms": "Pulisci {count} stanze selezionate",
   "Select rooms to clean": "Seleziona le stanze da pulire",
