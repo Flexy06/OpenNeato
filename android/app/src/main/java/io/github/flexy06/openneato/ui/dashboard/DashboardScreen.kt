@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -24,6 +25,7 @@ import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.EvStation
 import androidx.compose.material.icons.filled.Gamepad
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MoreVert
@@ -70,6 +72,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.flexy06.openneato.R
@@ -84,6 +87,7 @@ fun DashboardScreen(
     onChangeRobot: () -> Unit,
     onOpenManual: () -> Unit,
     onOpenSchedule: () -> Unit,
+    onOpenHistory: () -> Unit,
     vm: DashboardViewModel = viewModel(),
 ) {
     val ui by vm.ui.collectAsStateWithLifecycle()
@@ -134,7 +138,7 @@ fun DashboardScreen(
                     d.schedule.data?.takeIf { it.enabled }?.let {
                         ScheduleCard(it, ui.skipPending, vm::toggleSkipNextClean, onOpenSchedule)
                     }
-                    Shortcuts(onOpenManual, onOpenSchedule)
+                    Shortcuts(onOpenManual, onOpenSchedule, onOpenHistory)
                     d.system.data?.let { StatusRow(it, d.firmware.data?.version) }
                 }
             }
@@ -452,10 +456,16 @@ private fun actionIcon(a: Action): ImageVector = when (a) {
 
 // Entry points to the other screens (more follow as they are built)
 @Composable
-private fun Shortcuts(onOpenManual: () -> Unit, onOpenSchedule: () -> Unit) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Shortcut(Icons.Filled.Gamepad, stringResource(R.string.manual), onOpenManual, Modifier.weight(1f))
-        Shortcut(Icons.Filled.Schedule, stringResource(R.string.schedule), onOpenSchedule, Modifier.weight(1f))
+private fun Shortcuts(onOpenManual: () -> Unit, onOpenSchedule: () -> Unit, onOpenHistory: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Shortcut(Icons.Filled.Gamepad, stringResource(R.string.manual), onOpenManual, Modifier.weight(1f))
+            Shortcut(Icons.Filled.Schedule, stringResource(R.string.schedule), onOpenSchedule, Modifier.weight(1f))
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Shortcut(Icons.Filled.History, stringResource(R.string.history), onOpenHistory, Modifier.weight(1f))
+            Spacer(Modifier.weight(1f))
+        }
     }
 }
 
@@ -488,7 +498,12 @@ private fun ActionBar(buttons: List<ActionButton>, onAction: (Action) -> Unit) {
                 val content: @Composable () -> Unit = {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(actionIcon(b.action), contentDescription = null)
-                        Text(stringResource(actionLabel(b.action)), maxLines = 1)
+                        // Long labels ("Zur Ladestation") shrink instead of being cut off
+                        Text(
+                            stringResource(actionLabel(b.action)),
+                            maxLines = 1,
+                            autoSize = TextAutoSize.StepBased(minFontSize = 10.sp, maxFontSize = 14.sp),
+                        )
                     }
                 }
                 val mod = Modifier.weight(1f).height(72.dp)

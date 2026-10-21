@@ -1,8 +1,10 @@
 package io.github.flexy06.openneato.data
 
+import android.net.Uri
 import io.github.flexy06.openneato.api.apis.ActionsApi
 import io.github.flexy06.openneato.api.apis.FirmwareApi
 import io.github.flexy06.openneato.api.apis.GuidedApi
+import io.github.flexy06.openneato.api.apis.HistoryApi
 import io.github.flexy06.openneato.api.apis.ManualApi
 import io.github.flexy06.openneato.api.apis.SensorsApi
 import io.github.flexy06.openneato.api.apis.SystemApi
@@ -18,6 +20,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -33,6 +36,7 @@ class RobotClient {
         .build()
 
     class Apis(baseUrl: String, http: OkHttpClient) {
+        val history = HistoryApi(baseUrl, http)
         val actions = ActionsApi(baseUrl, http)
         val sensors = SensorsApi(baseUrl, http)
         val system = SystemApi(baseUrl, http)
@@ -76,12 +80,28 @@ class RobotClient {
         Request.Builder().url("$baseUrl/api/settings").put(patch.toString().toRequestBody("application/json".toMediaType())),
     )
 
-    private suspend fun request(builder: Request.Builder): JsonObject = withContext(Dispatchers.IO) {
+    private suspend fun request(builder: Request.Builder): JsonObject =
+        Json.parseToJsonElement(requestText(builder)).jsonObject
+
+    private suspend fun requestText(builder: Request.Builder): String = withContext(Dispatchers.IO) {
         http.newCall(builder.build()).execute().use { res ->
             val text = res.body?.string().orEmpty()
             if (!res.isSuccessful) throw RobotException(errorMessage(text) ?: "HTTP ${res.code}", res.code)
-            Json.parseToJsonElement(text).jsonObject
+            text
         }
+    }
+
+    // A cleaning session as stored (JSONL, decompressed by the firmware)
+    suspend fun historySession(baseUrl: String, name: String): String =
+        requestText(Request.Builder().url("$baseUrl/api/history/${Uri.encode(name)}").get())
+
+    // Upload a session file exported earlier (multipart field "file", like the web UI)
+    suspend fun importHistory(baseUrl: String, fileName: String, bytes: ByteArray) {
+        val body = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("file", fileName, bytes.toRequestBody("application/x-ndjson".toMediaType()))
+            .build()
+        requestText(Request.Builder().url("$baseUrl/api/history/import").post(body))
     }
 
     private fun errorMessage(body: Any?): String? {

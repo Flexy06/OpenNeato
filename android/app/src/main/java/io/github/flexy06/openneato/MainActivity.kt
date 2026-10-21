@@ -1,5 +1,6 @@
 package io.github.flexy06.openneato
 
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -11,11 +12,15 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import io.github.flexy06.openneato.ui.connect.ConnectScreen
 import io.github.flexy06.openneato.ui.dashboard.DashboardScreen
+import io.github.flexy06.openneato.ui.history.HistoryDetailScreen
+import io.github.flexy06.openneato.ui.history.HistoryListScreen
 import io.github.flexy06.openneato.ui.manual.ManualScreen
 import io.github.flexy06.openneato.ui.schedule.ScheduleScreen
 import io.github.flexy06.openneato.ui.theme.OpenNeatoTheme
@@ -27,6 +32,8 @@ private object Routes {
     const val DASHBOARD = "dashboard"
     const val MANUAL = "manual"
     const val SCHEDULE = "schedule"
+    const val HISTORY = "history"
+    const val HISTORY_DETAIL = "history/{name}"
 }
 
 class MainActivity : ComponentActivity() {
@@ -62,6 +69,7 @@ private fun AppNav(nav: NavHostController, start: String) {
                 },
                 onOpenManual = { nav.navigate(Routes.MANUAL) },
                 onOpenSchedule = { nav.navigate(Routes.SCHEDULE) },
+                onOpenHistory = { nav.navigate(Routes.HISTORY) },
             )
         }
         composable(Routes.MANUAL) {
@@ -69,6 +77,18 @@ private fun AppNav(nav: NavHostController, start: String) {
         }
         composable(Routes.SCHEDULE) {
             ScheduleScreen(onBack = { nav.popBackStack() })
+        }
+        composable(Routes.HISTORY) {
+            HistoryListScreen(
+                onBack = { nav.popBackStack() },
+                onOpen = { name -> nav.navigate("history/${Uri.encode(name)}") },
+            )
+        }
+        composable(
+            Routes.HISTORY_DETAIL,
+            arguments = listOf(navArgument("name") { type = NavType.StringType }),
+        ) { entry ->
+            HistoryDetailScreen(name = entry.arguments?.getString("name").orEmpty(), onBack = { nav.popBackStack() })
         }
     }
 }
