@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.EvStation
 import androidx.compose.material.icons.filled.Gamepad
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MoreVert
@@ -88,6 +89,7 @@ fun DashboardScreen(
     onOpenManual: () -> Unit,
     onOpenSchedule: () -> Unit,
     onOpenHistory: () -> Unit,
+    onOpenSettings: () -> Unit,
     vm: DashboardViewModel = viewModel(),
 ) {
     val ui by vm.ui.collectAsStateWithLifecycle()
@@ -104,7 +106,7 @@ fun DashboardScreen(
     val ready = ui.firmwareReady && !offline
 
     Scaffold(
-        topBar = { DashboardTopBar(d.firmware.data?.hostname, onChangeRobot = { vm.forgetRobot(onChangeRobot) }) },
+        topBar = { DashboardTopBar(d.firmware.data?.hostname, onChangeRobot = { vm.forgetRobot(onChangeRobot) }, onOpenSettings = onOpenSettings) },
         snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
             if (ready) {
@@ -138,7 +140,7 @@ fun DashboardScreen(
                     d.schedule.data?.takeIf { it.enabled }?.let {
                         ScheduleCard(it, ui.skipPending, vm::toggleSkipNextClean, onOpenSchedule)
                     }
-                    Shortcuts(onOpenManual, onOpenSchedule, onOpenHistory)
+                    Shortcuts(onOpenManual, onOpenSchedule, onOpenHistory, onOpenSettings)
                     d.system.data?.let { StatusRow(it, d.firmware.data?.version) }
                 }
             }
@@ -147,7 +149,7 @@ fun DashboardScreen(
 }
 
 @Composable
-private fun DashboardTopBar(hostname: String?, onChangeRobot: () -> Unit) {
+private fun DashboardTopBar(hostname: String?, onChangeRobot: () -> Unit, onOpenSettings: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     TopAppBar(
         title = {
@@ -163,6 +165,9 @@ private fun DashboardTopBar(hostname: String?, onChangeRobot: () -> Unit) {
             }
         },
         actions = {
+            IconButton(onClick = onOpenSettings) {
+                Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.settings))
+            }
             Box {
                 IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = null) }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -456,7 +461,12 @@ private fun actionIcon(a: Action): ImageVector = when (a) {
 
 // Entry points to the other screens (more follow as they are built)
 @Composable
-private fun Shortcuts(onOpenManual: () -> Unit, onOpenSchedule: () -> Unit, onOpenHistory: () -> Unit) {
+private fun Shortcuts(
+    onOpenManual: () -> Unit,
+    onOpenSchedule: () -> Unit,
+    onOpenHistory: () -> Unit,
+    onOpenSettings: () -> Unit,
+) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Shortcut(Icons.Filled.Gamepad, stringResource(R.string.manual), onOpenManual, Modifier.weight(1f))
@@ -464,7 +474,7 @@ private fun Shortcuts(onOpenManual: () -> Unit, onOpenSchedule: () -> Unit, onOp
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Shortcut(Icons.Filled.History, stringResource(R.string.history), onOpenHistory, Modifier.weight(1f))
-            Spacer(Modifier.weight(1f))
+            Shortcut(Icons.Filled.Settings, stringResource(R.string.settings), onOpenSettings, Modifier.weight(1f))
         }
     }
 }

@@ -488,8 +488,8 @@ builds on what it can see: the path recorded in the cleaning history.
 
 Pinning a mapping run also builds a wall map from the scans (calibrating how the LIDAR is mounted
 automatically) and uploads it to the ESP32 as a localization field. The walls are drawn under the
-path in the editor. Any other complete house clean can be pinned too, but without the wall map the
-robot falls back to dead reckoning plus the wall compass and its position drifts noticeably.
+path in the editor. Room cleaning needs this wall map: pin a mapping run, not a plain house clean.
+For several rooms, open all doors for the mapping run so it covers every room.
 
 The pinned path is copied to its own file, so it survives history rotation. Pinning another run
 later keeps your rooms and no-go zones: every run starts on the dock, so all runs share the same
@@ -516,30 +516,31 @@ position estimate; **Return to dock** ends cleaning early, **Stop** halts the ro
 - **Route**: each selected room is covered in parallel lanes 25 cm apart, along its longer
   side, over the free floor of the LIDAR wall map (at least ~22 cm from walls, minus anything
   near a no-go zone). Lane pieces are visited nearest-first in alternating direction, so the
-  robot cleans in a serpentine. Without a wall map the lanes are limited to floor the recording
-  covered. Between lanes, rooms and on the way home the robot takes the shortest path over free
-  floor (BFS on a 20 cm grid).
-- **Driving**: TestMode + `SetMotor`. Moderate heading changes are driven as arcs; the next
-  command is sent before the current one ends, so the robot keeps rolling through waypoints and
-  only stops to turn on the spot for sharp turns. LIDAR fixes are taken while driving.
-- **Position**: wheel-encoder dead reckoning from the dock, corrected by matching LIDAR scans
-  against the wall map of the mapping run (correlative scan matching, a new fix every 40 cm or
-  30° of travel). The first fix happens on the dock. The status line shows **Map lock N %**, the
-  match quality of the last fix. Without a wall map, heading drift is only corrected by a LIDAR
-  "wall compass" (dominant wall direction of rectangular rooms), and position error grows with
-  distance. Moving furniture a lot after the mapping run lowers the match quality; record a new
-  mapping run then (rooms and no-go zones are kept).
-- **Safety**: bumpers, wheel stall and the cliff sensors are polled continuously (stop, back off,
-  remember the obstacle, detour). A lifted robot aborts the run. Low battery (20 %), a 2 h limit or
-  repeated obstacles send the robot home.
-- **Docking**: the robot drives to a staging point 90 cm in front of the dock, turns to the dock
-  heading and matches a LIDAR scan against the wall map (or, without one, against the scan taken on
-  the dock) to correct its position. Once it touches the contacts it stops; if neither the contacts
-  nor the charger report dock power it lines up again, and finally hands over to the robot's own
-  return-to-base, which is then verified for up to 2.5 minutes (result in the run trace). It
-  then reverses along the dock axis, steering its rear onto the line, re-checks the alignment with a
-  second scan 30 cm out and backs straight onto the contacts. A miss triggers one more line-up;
-  after that it hands over to the robot's own return-to-base.
+  robot cleans in a serpentine. Between lanes, rooms and on the way home the robot takes the
+  shortest path over free floor (BFS on a 20 cm grid).
+- **Driving**: TestMode + `SetMotor` with gentle acceleration ramps. Lanes and transit lines are
+  driven in one go: the next command is sent before the current one ends and small heading
+  corrections are gentle arcs, so the robot only stops for sharp corners (more than ~20°),
+  obstacles and bumps.
+- **Position**: wheel odometry from the dock, corrected by a particle filter that matches LIDAR
+  scans against the wall map of the mapping run. Scans are taken on the move (every ~45 cm and right
+  after each turn) and placed at the odometry pose of the moment they were taken. Returns from
+  things the map does not have (chairs, boxes, a moved table) barely count, so clutter does not make
+  the robot lose itself. The status line shows **Map lock N %** and the estimated spread. Only if
+  two fixes in a row are bad does the robot stop and re-localize by turning on the spot. A wall map
+  is required; record a new mapping run after big changes (rooms and no-go zones are kept).
+- **Obstacles**: what the LIDAR sees but the map lacks is avoided before the bumper finds it (the
+  robot brakes when a scan shows something on the rest of its line). Bumpers, wheel stall and the
+  cliff sensors are polled continuously (stop, back off, remember, detour). From a tight spot the
+  planner cannot leave (under a table) the robot retraces its way in.
+- **Several rooms**: the robot drives between rooms through doorways of 70 cm and more. A room it
+  cannot reach (closed door) is skipped and reported as **Not reached** after the run.
+- **Safety**: a lifted robot aborts the run. Low battery (20 %), a 2 h limit or repeated obstacles
+  send the robot home. Every wait has a deadline, so the robot is never left in TestMode.
+- **Docking**: from a staging point in front of the dock the robot matches its scans against the
+  scan it took on the dock at the start (accurate to about a centimetre), reverses along the dock
+  axis and backs onto the contacts; the charger confirms. A miss triggers another line-up, and
+  after three the robot's own return-to-base takes over (verified for up to 2.5 minutes).
 - Guided runs are not recorded in the cleaning history yet.
 
 ---

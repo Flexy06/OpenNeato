@@ -5,9 +5,12 @@ import io.github.flexy06.openneato.api.apis.ActionsApi
 import io.github.flexy06.openneato.api.apis.FirmwareApi
 import io.github.flexy06.openneato.api.apis.GuidedApi
 import io.github.flexy06.openneato.api.apis.HistoryApi
+import io.github.flexy06.openneato.api.apis.LogsApi
 import io.github.flexy06.openneato.api.apis.ManualApi
 import io.github.flexy06.openneato.api.apis.SensorsApi
+import io.github.flexy06.openneato.api.apis.SettingsApi
 import io.github.flexy06.openneato.api.apis.SystemApi
+import io.github.flexy06.openneato.api.apis.WiFiApi
 import io.github.flexy06.openneato.api.infrastructure.ClientError
 import io.github.flexy06.openneato.api.infrastructure.ClientException
 import io.github.flexy06.openneato.api.infrastructure.ServerError
@@ -23,7 +26,9 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okio.BufferedSink
 import java.util.concurrent.TimeUnit
 
 // Thin wrapper around the generated API classes: one set per robot base URL,
@@ -37,6 +42,9 @@ class RobotClient {
 
     class Apis(baseUrl: String, http: OkHttpClient) {
         val history = HistoryApi(baseUrl, http)
+        val settings = SettingsApi(baseUrl, http)
+        val wifi = WiFiApi(baseUrl, http)
+        val logs = LogsApi(baseUrl, http)
         val actions = ActionsApi(baseUrl, http)
         val sensors = SensorsApi(baseUrl, http)
         val system = SystemApi(baseUrl, http)
@@ -94,6 +102,40 @@ class RobotClient {
     // A cleaning session as stored (JSONL, decompressed by the firmware)
     suspend fun historySession(baseUrl: String, name: String): String =
         requestText(Request.Builder().url("$baseUrl/api/history/${Uri.encode(name)}").get())
+
+    // A log file as text (decompressed by the firmware)
+    suspend fun logText(baseUrl: String, name: String): String =
+        requestText(Request.Builder().url("$baseUrl/api/logs/${Uri.encode(name)}").get())
+
+    // OTA update: multipart "file" + MD5 for the bridge to verify; the bridge writes
+    // the flash before it answers, so allow for that. Progress 0..1 of the upload.
+    suspend fun uploadFirmware(baseUrl: String, bin: ByteArray, md5: String, progress: (Float) -> Unit) {
+        val file = object : RequestBody() {
+            override fun contentType() = "application/octet-stream".toMediaType()
+            override fun contentLength() = bin.size.toLong()
+            override fun writeTo(sink: BufferedSink) {
+                var sent = 0
+                while (sent < bin.size) {
+                    val n = minOf(8192, bin.size - sent)
+                    sink.write(bin, sent, n)
+                    sent += n
+                    progress(sent.toFloat() / bin.size)
+                }
+            }
+        }
+        val body = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("file", "firmware.bin", file)
+            .build()
+        val slow = http.newBuilder().writeTimeout(120, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS).build()
+        withContext(Dispatchers.IO) {
+            slow.newCall(Request.Builder().url("$baseUrl/api/firmware/update?hash=$md5").post(body).build()).execute()
+                .use { res ->
+                    val text = res.body?.string().orEmpty()
+                    if (!res.isSuccessful) throw RobotException(errorMessage(text) ?: "HTTP ${res.code}", res.code)
+                }
+        }
+    }
 
     // Upload a session file exported earlier (multipart field "file", like the web UI)
     suspend fun importHistory(baseUrl: String, fileName: String, bytes: ByteArray) {
